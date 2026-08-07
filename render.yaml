@@ -1,0 +1,53 @@
+# Render blueprint — deploys the whole app as one Node web service.
+# Dashboard → New → Blueprint → point at your fork of this repo.
+#
+# Every secret is sync: false, so Render prompts you for the value instead of
+# ever reading it from the repo. See SETUP.md for where each value comes from.
+#
+# Note: the free plan sleeps when idle, which also disconnects the Discord bot
+# (slash commands and voice snapshots stop until the next web request wakes it).
+# For an always-on bot, use "starter" or above.
+
+services:
+  - type: web
+    name: guild-hall
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_REDIRECT_URI
+        sync: false # https://<this-service>.onrender.com/api/auth/discord/callback
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_ALLOWED_ROLE_IDS
+        sync: false
+      - key: DISCORD_ADMIN_ROLE_IDS
+        sync: false
+      - key: DISCORD_MEMBER_ROLE_IDS
+        sync: false
+      - key: DISCORD_ROSTER_CHANNEL_ID
+        sync: false
+      - key: DISCORD_LOA_CHANNEL_ID
+        sync: false
+      - key: DISCORD_ANNOUNCE_CHANNEL_ID
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true # Render generates a strong random value
+      - key: APP_URL
+        sync: false # https://<this-service>.onrender.com
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
