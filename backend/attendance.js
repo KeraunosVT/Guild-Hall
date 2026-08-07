@@ -40,25 +40,29 @@ module.exports = function createAttendance(supabase) {
       }
 
       const eventId = crypto.randomUUID();
+      const now = new Date().toISOString();
 
-      // One transaction via the save_event function (migrations/012), the same
-      // pattern save_match uses. This was two inserts with a compensating delete
-      // if the second failed — a hand-rolled rollback whose own failure path
-      // (delete fails too) leaves an event with zero attendees and nothing
-      // explaining it. A function body either commits whole or not at all.
-      const { data: inserted, error } = await supabase.rpc('save_event', {
-        p_id: eventId,
-        p_title: String(title).slice(0, 200),
-        p_event_date: eventDate || null,
-        p_event_schedule_id: eventScheduleId || null,
-        p_attendees: attendees.map((a) => ({ id: String(a.id), name: String(a.name || '') })),
+      const { error: eErr } = await supabase.from('events').insert({
+        id: eventId, title: String(title).slice(0, 200),
+        event_date: eventDate || null,
+        event_schedule_id: eventScheduleId || null,
+        created_at: now,
       });
-      if (error) {
-        console.error('save_event error:', error.message);
-        throw httpError(500, 'Failed to create event.');
+      if (eErr) { console.error('Event insert error:', eErr.message); throw httpError(500, 'Failed to create event.'); }
+
+      const rows = attendees.map((a) => ({
+        id: crypto.randomUUID(), event_id: eventId,
+        discord_id: String(a.id), display_name: String(a.name || '').slice(0, 120),
+        joined_at: now,
+      }));
+      const { error: aErr } = await supabase.from('event_attendance').insert(rows);
+      if (aErr) {
+        console.error('Attendance insert error:', aErr.message);
+        await supabase.from('events').delete().eq('id', eventId);
+        throw httpError(500, 'Failed to save attendees — event rolled back.');
       }
 
-      return { id: eventId, attendees: inserted ?? attendees.length };
+      return { id: eventId, attendees: rows.length };
     },
   };
 };

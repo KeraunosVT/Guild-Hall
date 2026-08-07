@@ -20,7 +20,7 @@ const PRIO_STYLE = {
 };
 
 export default function LootHistory() {
-  const { user, can, canAny } = useAuth();
+  const { user, canAny } = useAuth();
   const [catalog, setCatalog] = useState(null);
   const [awards, setAwards] = useState([]);
   const [currencyAwards, setCurrencyAwards] = useState([]);
@@ -28,7 +28,7 @@ export default function LootHistory() {
   const [error, setError] = useState('');
   const [member, setMember] = useState('');
   const [kind, setKind] = useState('all'); // all | item | currency
-  const [importing, setImporting] = useState(null); // null | 'item' | 'currency'
+  const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [savingBuild, setSavingBuild] = useState(null); // award id currently being updated
 
@@ -83,23 +83,17 @@ export default function LootHistory() {
     (e) => (!member || e.discord_id === member) && (kind === 'all' || e.kind === kind),
   ), [entries, member, kind]);
 
-  // Both importers share one contract — { imported, skipped, errors[] } — so
-  // one handler covers gear and currency; `kind` only decides the endpoint and
-  // what the result line calls the rows it counted.
-  const handleImport = (kind) => (e) => {
+  const handleImport = (e) => {
     const f = e.target.files[0];
     e.target.value = '';
     if (!f) return;
-    setImporting(kind); setImportResult(null); setError('');
+    setImporting(true); setImportResult(null); setError('');
     const form = new FormData();
     form.append('file', f);
-    const url = kind === 'currency'
-      ? '/api/admin/currency-awards/import'
-      : '/api/admin/loot/awards/import';
-    axios.post(url, form)
-      .then((res) => { setImportResult({ ...res.data, kind }); load(); })
+    axios.post('/api/admin/loot/awards/import', form)
+      .then((res) => { setImportResult(res.data); load(); })
       .catch((err) => setError(err.response?.data?.error || 'Import failed.'))
-      .finally(() => setImporting(null));
+      .finally(() => setImporting(false));
   };
 
   if (!canAny('loot.awards', 'loot.catalog', 'loot.currency', 'loot.requests')) {
@@ -110,28 +104,17 @@ export default function LootHistory() {
     <PageShell maxWidth="max-w-4xl">
       {error && <div className="mb-6 px-5 py-3 rounded-lg border border-oxblood/50 bg-oxblooddeep/20 text-bone text-sm">{error}</div>}
 
-      <div className="panel rounded-lg p-4 mb-6 space-y-3">
-        {/* Each importer is gated on the capability its own endpoint checks, so
-            an officer only sees the half of the ledger they can write to. */}
-        {can('loot.awards') && (
-          <ImportRow
-            label="Upload gear CSV" busy={importing === 'item'} disabled={Boolean(importing)}
-            onPick={handleImport('item')}
-            columns="item, member, date (optional), awarded_by (optional), build (optional — PvP / Second Build / PvE)"
-          />
-        )}
-        {can('loot.currency') && (
-          <ImportRow
-            label="Upload Lucent / shard CSV" busy={importing === 'currency'} disabled={Boolean(importing)}
-            onPick={handleImport('currency')}
-            columns="member, amount, currency (optional — defaults to Lucent), date (optional), reason (optional), awarded_by (optional)"
-          />
-        )}
+      <div className="panel rounded-lg p-4 mb-6">
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className={`inline-flex items-center gap-2 px-4 py-2 bg-brass hover:bg-brassbright text-ink font-semibold rounded-lg text-sm cursor-pointer transition-colors ${importing ? 'opacity-40 pointer-events-none' : ''}`}>
+            <Upload className="w-4 h-4" /> {importing ? 'Importing…' : 'Upload CSV'}
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImport} disabled={importing} />
+          </label>
+          <span className="text-ash text-xs">Columns: item, member, date (optional), awarded_by (optional), build (optional — PvP / Second Build / PvE)</span>
+        </div>
         {importResult && (
           <div className="mt-3 text-sm">
-            <span className="text-emerald-400">
-              {importResult.imported} {importResult.kind === 'currency' ? 'grant' : 'award'}{importResult.imported === 1 ? '' : 's'} imported
-            </span>
+            <span className="text-emerald-400">{importResult.imported} imported</span>
             {importResult.skipped > 0 && <span className="text-oxblood ml-3">{importResult.skipped} skipped</span>}
             {importResult.errors?.length > 0 && (
               <ul className="mt-2 text-xs text-ash space-y-0.5 max-h-32 overflow-auto">
@@ -233,19 +216,5 @@ export default function LootHistory() {
         </div>
       )}
     </PageShell>
-  );
-}
-
-// One importer row: button plus the columns it expects. Two of these sit on the
-// page, so the layout lives in one place rather than being copied per ledger.
-function ImportRow({ label, columns, busy, disabled, onPick }) {
-  return (
-    <div className="flex items-center gap-3 flex-wrap">
-      <label className={`inline-flex items-center gap-2 px-4 py-2 bg-brass hover:bg-brassbright text-ink font-semibold rounded-lg text-sm cursor-pointer transition-colors shrink-0 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
-        <Upload className="w-4 h-4" /> {busy ? 'Importing…' : label}
-        <input type="file" accept=".csv,text/csv" className="hidden" onChange={onPick} disabled={disabled} />
-      </label>
-      <span className="text-ash text-xs">Columns: {columns}</span>
-    </div>
   );
 }

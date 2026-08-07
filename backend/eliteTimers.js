@@ -3,7 +3,9 @@
 // whenever a newer kill is reported.
 const LOCATIONS = require('../shared/eliteLocations.json');
 
-const GUILD_TZ = 'America/New_York';
+// Same source of truth as loa.js: the guild's timezone lives in
+// shared/guild.json so a re-themed deployment isn't pinned to US Eastern.
+const GUILD_TZ = require('../shared/guild.json').timezone || 'America/New_York';
 
 // Offset (ms) that `timeZone`'s wall clock reads relative to UTC at the instant `date`
 // (e.g. -4h for America/New_York during EDT). Timezone-independent of the host

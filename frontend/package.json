@@ -1,5 +1,5 @@
 {
-  "name": "gear-gap-frontend",
+  "name": "guild-hall-frontend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -22,5 +22,6 @@
     "react-router-dom": "^7.17.0",
     "tailwindcss": "^3.4.13",
     "vite": "^5.4.8"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

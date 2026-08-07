@@ -1,4 +1,4 @@
-# Guild Hall
+# Gear Gap — Guild Hall
 
 A guild-management web app for a *Throne & Liberty* guild, built around Discord: members log in with Discord OAuth, officers run the "war table" (attendance, loot council, rosters), and a companion Discord bot handles slash commands, timers, and announcements. Branding (house name, tag, motto) lives in one file and is meant to be re-themed per guild — see [Configuration](#configuration).
 

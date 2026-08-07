@@ -37,33 +37,6 @@ module.exports = function createAuditLog(supabase) {
   // lifecycle completes (including multer's multipart parsing on upload
   // routes), so req.body is fully populated by then even for file uploads;
   // the file bytes themselves land in req.file/req.files, never req.body.
-  // A /match/commit body carries every parsed player row — ~20 KB each, and a
-  // 500-row sample of this table held 1.75 MB of them. The audit log exists to
-  // answer "who changed what, when", and 120 stat rows don't help with that, so
-  // long arrays collapse to a count and long strings are clipped.
-  //
-  // Shape is preserved otherwise: the viewer just JSON.stringify()s this, so a
-  // string standing in for an array renders fine and still reads honestly.
-  const MAX_ARRAY_ITEMS = 5;
-  const MAX_STRING_CHARS = 500;
-  const MAX_DEPTH = 6;
-
-  function summarise(value, depth = 0) {
-    if (depth > MAX_DEPTH) return '[nested]';
-    if (Array.isArray(value)) {
-      return value.length > MAX_ARRAY_ITEMS
-        ? `[${value.length} rows]`
-        : value.map((v) => summarise(v, depth + 1));
-    }
-    if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, summarise(v, depth + 1)]));
-    }
-    if (typeof value === 'string' && value.length > MAX_STRING_CHARS) {
-      return `${value.slice(0, MAX_STRING_CHARS)}… (${value.length} chars)`;
-    }
-    return value;
-  }
-
   function log(req, res, next) {
     if (req.method === 'GET') return next();
 
@@ -75,7 +48,7 @@ module.exports = function createAuditLog(supabase) {
         method: req.method,
         path: req.path,
         feature: featureFor(req.path),
-        body: summarise(req.body || {}),
+        body: req.body || {},
         status_code: res.statusCode,
       }).then(({ error }) => {
         // Never let a failed insert become an unhandled rejection — this app

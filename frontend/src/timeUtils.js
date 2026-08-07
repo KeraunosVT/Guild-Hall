@@ -1,18 +1,27 @@
-export const GUILD_TZ = 'America/New_York';
+import identity from '../../shared/guild.json';
+
+// Timezone and day-start rollover come from shared/guild.json — the single
+// per-guild config file — so backend/loa.js and this mirror can no longer
+// drift apart, and a re-themed deployment isn't pinned to US Eastern.
+// Fallbacks keep an older guild.json (without these keys) working unchanged.
+export const GUILD_TZ = identity.timezone || 'America/New_York';
 
 // Mirror of the guild-night model in backend/loa.js — keep the two in step.
 // A guild night doesn't end at midnight: the 12:30am Guild Field Boss is the
 // tail of the previous evening's block, not the start of a new day. The
 // schedule stores each event on the calendar day it actually occurs (Sunday
 // 00:30), and these map it back to the night it belongs to (Saturday).
-export const GUILD_DAY_START = '01:00';
-const GUILD_DAY_START_MIN = 60;
 const MINUTES_PER_DAY = 1440;
 
 const minutesOf = (hhmm) => {
   const [h, m] = String(hhmm).split(':').map(Number);
   return h * 60 + m;
 };
+
+export const GUILD_DAY_START = /^\d{2}:\d{2}$/.test(identity.dayStart || '')
+  ? identity.dayStart
+  : '01:00';
+const GUILD_DAY_START_MIN = minutesOf(GUILD_DAY_START);
 
 // Where a wall-clock time falls within the guild night, as minutes from its
 // start — so 00:30 (1470) sorts after 21:00 (1260) instead of before it, which

@@ -62,15 +62,14 @@ export default function Home() {
     setLoading(true);
     setError(false);
     try {
-      // One call, sliced — the 6 shown are just the head of the 20 the
-      // win/draw/loss strip counts, so fetching both was a wasted round trip.
-      const [statsRes, matchesRes] = await Promise.all([
+      const [statsRes, matchesRes, last10Res] = await Promise.all([
         axios.get('/api/stats/summary'),
+        axios.get('/api/matches/recent?limit=6'),
         axios.get('/api/matches/recent?limit=20'),
       ]);
       setStats(statsRes.data);
-      const last10 = matchesRes.data || [];
-      setRecentMatches(last10.slice(0, 6));
+      setRecentMatches(matchesRes.data);
+      const last10 = last10Res.data || [];
       const w = last10.filter((m) => m.result === 'Win').length;
       const d = last10.filter((m) => m.result === 'Draw').length;
       const l = last10.filter((m) => m.result === 'Loss').length;

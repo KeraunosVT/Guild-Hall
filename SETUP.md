@@ -151,7 +151,7 @@ Set the environment variables below (locally: put them in `backend/.env`).
 Add the original repo as an upstream remote and merge:
 
 ```bash
-git remote add upstream https://github.com/KeraunosVT/Guild-Hall.git
+git remote add upstream https://github.com/KeraunosVT/TNL-Stats.git
 git fetch upstream
 git merge upstream/main
 ```
