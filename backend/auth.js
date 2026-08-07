@@ -309,4 +309,19 @@ function requireAdmin(req, res, next) {
   });
 }
 
-module.exports = { router, requireAuth, requireAdmin, requireAdminArea, requirePermission, userHas };
+// Lightweight session check for non-API routes (e.g. deciding whether the root
+// path shows the marketing landing page or the app). Returns true only for a
+// present, validly-signed session cookie — same secret and cookie name as the
+// real auth path, so the two can't disagree.
+function hasValidSession(req) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!authConfigured || !token) return false;
+  try {
+    jwt.verify(token, JWT_SECRET);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { router, requireAuth, requireAdmin, requireAdminArea, requirePermission, userHas, hasValidSession };

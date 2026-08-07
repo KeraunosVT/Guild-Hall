@@ -11,7 +11,7 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const {
-  router: authRouter, requireAuth, requireAdminArea, requirePermission, userHas,
+  router: authRouter, requireAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
 } = require('./auth');
 const { listMembers } = require('./discord');
 const SHARDS = require('../shared/shards.json');
@@ -108,6 +108,67 @@ const canonicalGuild = (name) => GUILD_ALIASES[(name || '').trim()] || (name || 
 
 // Health check (public)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// ── EARLY ACCESS (public) ────────────────────────────────────────────────────
+// The landing page's "request early access" form posts here. We forward the
+// submission to a Discord webhook (officer channel) — no database, no stored
+// PII beyond what Discord keeps. Rate-limited to blunt spam/abuse of an
+// unauthenticated endpoint. If EARLY_ACCESS_WEBHOOK_URL isn't set, the route
+// reports itself unavailable rather than pretending to succeed.
+const EARLY_ACCESS_WEBHOOK_URL = process.env.EARLY_ACCESS_WEBHOOK_URL || '';
+const earlyAccessLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  limit: 5,                 // 5 requests/hour per IP — a person, not a bot
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests — please try again later.' },
+});
+
+app.post('/api/early-access', earlyAccessLimiter, async (req, res) => {
+  if (!EARLY_ACCESS_WEBHOOK_URL) {
+    return res.status(503).json({ error: 'Early access signups are not currently open.' });
+  }
+
+  // Accept a Discord handle plus optional context. Everything is trimmed and
+  // length-capped so a submission can't bloat or break the webhook payload.
+  const clean = (v, max) => String(v || '').trim().slice(0, max);
+  const discord = clean(req.body.discord, 64);
+  const guild = clean(req.body.guild, 100);
+  const game = clean(req.body.game, 60);
+  const note = clean(req.body.note, 500);
+
+  if (!discord) {
+    return res.status(400).json({ error: 'Please include a Discord handle so we can reach you.' });
+  }
+
+  // Discord webhooks treat certain sequences as formatting/mentions; strip @
+  // and backticks defensively and disable mention parsing on the payload.
+  const sanitize = (s) => s.replace(/[`@]/g, '').replace(/\n{3,}/g, '\n\n');
+  const lines = [
+    `**New early-access request**`,
+    `**Discord:** ${sanitize(discord)}`,
+    guild && `**Guild:** ${sanitize(guild)}`,
+    game && `**Game:** ${sanitize(game)}`,
+    note && `**Note:** ${sanitize(note)}`,
+  ].filter(Boolean);
+
+  try {
+    const resp = await fetch(EARLY_ACCESS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: lines.join('\n'),
+        allowed_mentions: { parse: [] }, // never ping anyone from user input
+      }),
+    });
+    if (!resp.ok) throw new Error(`webhook responded ${resp.status}`);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Early-access webhook failed:', err.message);
+    return res.status(502).json({ error: 'Could not submit right now — please try again later.' });
+  }
+});
 
 // Discord login routes (public)
 app.use('/api/auth', authRouter);
@@ -974,6 +1035,26 @@ function getClassNameBackend(weapon1, weapon2) {
 
 // ── SERVE REACT FRONTEND ─────────────────────────────────────────────────────
 const frontendPath = path.join(__dirname, '../frontend/dist');
+const LANDING_PATH = path.join(__dirname, 'landing.html');
+const PRIVACY_PATH = path.join(__dirname, 'privacy.html');
+const TERMS_PATH = path.join(__dirname, 'terms.html');
+
+// Public marketing landing page. Shown at the root ONLY to visitors without a
+// session — logged-in members hitting "/" fall through to the app. "/landing"
+// always shows it regardless of session (for sharing/previewing), and "/app"
+// always reaches the app (the landing page's "Member login" link) since it
+// isn't intercepted here. Session detection reuses auth.js's own check, so the
+// landing/app decision can never drift from the real login state.
+app.get('/landing', (req, res) => res.sendFile(LANDING_PATH));
+// Public legal pages — always available, no session needed (the landing page
+// footer and the login screen link here).
+app.get('/privacy', (req, res) => res.sendFile(PRIVACY_PATH));
+app.get('/terms', (req, res) => res.sendFile(TERMS_PATH));
+app.get('/', (req, res, next) => {
+  if (hasValidSession(req)) return next();       // member → app (static index.html)
+  return res.sendFile(LANDING_PATH);             // visitor → landing
+});
+
 app.use(express.static(frontendPath));
 
 // Unknown API routes return JSON 404 (not the SPA's index.html)

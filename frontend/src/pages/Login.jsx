@@ -73,6 +73,11 @@ export default function Login() {
       <div className="rise rise-3 mt-10 font-display text-[10px] tracking-[0.25em] text-ash">
         {GUILD.house.toUpperCase()}
       </div>
+
+      <div className="mt-6 flex gap-5 text-xs text-ash/70">
+        <a href="/privacy" className="hover:text-brassbright transition-colors">Privacy</a>
+        <a href="/terms" className="hover:text-brassbright transition-colors">Terms</a>
+      </div>
     </div>
   );
 }
