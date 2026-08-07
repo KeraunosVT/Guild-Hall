@@ -430,6 +430,32 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       const grantId = crypto.randomUUID();
       const amt = update.amount ?? existing.amount;
       const itemLabel = update.item_name ?? existing.item_name;
+
+      // Atomically CLAIM the payout before writing the ledger row. Two officers
+      // clicking "mark paid" at the same moment both saw currency_award_id=null
+      // above; without this, both would insert a grant and double-pay. By
+      // updating only WHERE currency_award_id IS STILL NULL and asking for the
+      // affected row back, exactly one request wins the claim — the loser gets
+      // no row and bails out before touching the ledger. This replaces the
+      // read-then-write guard, which only prevented the sequential case.
+      const { data: claimed, error: claimErr } = await supabase
+        .from('lucent_requests')
+        .update({ currency_award_id: grantId })
+        .eq('id', req.params.id)
+        .is('currency_award_id', null)
+        .select('id')
+        .maybeSingle();
+
+      if (claimErr) {
+        console.error('Lucent request claim error:', claimErr.message);
+        return res.status(500).json({ error: 'Could not update the request.' });
+      }
+      if (!claimed) {
+        // Another officer already claimed it in the moment between our read and
+        // now. Not an error from the user's perspective — it's paid.
+        return res.status(409).json({ error: 'This request was just marked paid by someone else.' });
+      }
+
       const { error: gErr } = await supabase.from('currency_awards').insert({
         id: grantId, discord_id: existing.discord_id, display_name: existing.display_name,
         currency: 'lucent', amount: amt,
@@ -437,9 +463,12 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
         awarded_by: req.user.username || req.user.id,
         awarded_at: new Date().toISOString(),
       });
-      // Without the grant the request isn't really paid, so don't say it is.
       if (gErr) {
+        // We claimed the slot but couldn't write the ledger — release the claim
+        // so a retry can succeed rather than leaving a paid request with no grant.
         console.error('Lucent request grant error:', gErr.message);
+        await supabase.from('lucent_requests').update({ currency_award_id: null })
+          .eq('id', req.params.id).eq('currency_award_id', grantId);
         return res.status(500).json({ error: 'Could not record the Lucent grant, so the request was left unpaid.' });
       }
       update.currency_award_id = grantId;

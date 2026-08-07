@@ -6,6 +6,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
@@ -60,6 +61,30 @@ const gearSubmitLimiter = rateLimit({
 // list of full origins, e.g. CORS_ORIGINS=http://localhost:5173
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
   .split(',').map((s) => s.trim()).filter((s) => /^https?:\/\//.test(s));
+// Security headers. The CSP is deliberately permissive enough for what the app
+// actually loads — Google Fonts, Discord avatars, the Supabase image bucket,
+// and the landing page's inline <style>/<script> — while still shutting down
+// the obvious vectors (framing, plugin embeds, base-tag hijacking). If you add
+// a new external asset host, add it here or it'll be blocked.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],       // landing page inline script
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://*.supabase.co'],
+      connectSrc: ["'self'", 'https://*.supabase.co'],
+      frameAncestors: ["'none'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+    },
+  },
+  // The app is same-origin; this header can interfere with OAuth popups/redirects
+  // on some setups and buys little here, so keep it relaxed.
+  crossOriginOpenerPolicy: false,
+}));
+
 app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
@@ -514,10 +539,27 @@ app.delete('/api/loa/:id', async (req, res) => {
 });
 
 // ── ALL-TIME PLAYER STATS (our guild only) ───────────────────────────────────
+// Short-TTL cache for the players roster. This endpoint aggregates the full
+// match history (an RPC over all rows plus a paginated weapon-class scan of
+// player_match_stats) and joins live Discord membership — cheap now, but it
+// grows with match history and is hit on every Roster page load. A brief cache
+// collapses bursts (several officers opening the roster during raid) into one
+// computation. Keyed by the "last N" param since that changes the result set.
+// Invalidated implicitly by TTL; a new match appears within PLAYERS_CACHE_SECONDS.
+const PLAYERS_CACHE_TTL_MS = (parseInt(process.env.PLAYERS_CACHE_SECONDS, 10) || 30) * 1000;
+const playersCache = new Map(); // key -> { at, players }
+
 app.get('/api/players', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
   try {
     const lastN = Math.min(Math.max(parseInt(req.query.last, 10) || 0, 0), 500);
+
+    const cacheKey = `last:${lastN}`;
+    const hit = playersCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < PLAYERS_CACHE_TTL_MS) {
+      return res.json({ players: hit.players });
+    }
+
     const ids = await identities.load();
 
     let data;
@@ -586,6 +628,7 @@ app.get('/api/players', async (req, res) => {
       return { ...p, is_member: did ? memberIds.has(did) : false, primary_class: primaryClassFor(p.player_name) };
     });
 
+    playersCache.set(cacheKey, { at: Date.now(), players });
     res.json({ players });
   } catch (err) {
     console.error('Player stats error:', err.message);
