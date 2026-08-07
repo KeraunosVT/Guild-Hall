@@ -1,33 +1,18 @@
 import identity from '../../shared/guild.json';
 
-// The guild's own voice — the half of the branding that is prose rather than
-// data. The machine-readable half (name, tag, aliases, timezone, rollover)
-// lives in shared/guild.json, because the backend needs it too; nothing here
-// is read by the server, so it stays frontend-only.
+// Guild identity — edit here to rebrand the whole hub.
 //
-// Note the two names never mix: "Guild Hall" is the application, and is
-// hardcoded wherever the app refers to itself (page title, footer). Everything
-// below is whatever *your* guild is called and believes. Re-theming a fork
-// means editing this file and guild.json — not renaming the app.
-
-// Shown large in the UI, from the shared config so it can't drift from the
-// name the backend matches scoreboards against.
-export const house = identity.house;
-
-// One line, displayed under the house name. Keep it short — it sits in a
-// header, not a paragraph.
-export const motto = 'TODO: your guild motto';
-
-// The longer statement of what the guild expects of its members. Rendered as
-// a list, one string per line; add or remove lines freely.
-export const creed = [
-  'TODO: first line of your creed',
-  'TODO: second line of your creed',
-  'TODO: third line of your creed',
-];
-
-// Path to the emblem in frontend/public/. Replace the file rather than this
-// string, so the favicon in index.html keeps pointing at the same asset.
-export const sigil = '/sigil.svg';
-
-export default { house, motto, creed, sigil };
+// The name and alias list live in shared/guild.json because the backend needs
+// the same values: server.js collapses past guild names onto the current one so
+// a rename doesn't split the war record, and admin.js stamps the house name on
+// the Discord roster embed. Keeping them in one file means a rename can't leave
+// the two halves disagreeing — which is a silent failure, since an unrecognised
+// name is treated as an enemy guild rather than raising anything.
+//
+// `house` is the ceremonial name shown large; `tag` is the active in-game tag.
+// Voice and lore stay here — nothing outside the frontend needs them.
+export const GUILD = {
+  ...identity,
+  motto:  'Clump. Collide. Conquer.',
+  creed:  'We do not wait for the fight to come to us — we bring the fight, and we bring all of it at once. No lone blades, no scattered lines: we stack as one mass and move as one weight, so that when we land, nothing standing there is still standing after. Momentum is our weapon before the first hit ever lands. We are not the guild that reacts. We are the one that arrives.',
+};

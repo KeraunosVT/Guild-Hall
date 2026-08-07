@@ -1,19 +1,6 @@
-<!--
-  Placeholder emblem. Replace this file with your guild's own sigil, keeping
-  the filename — index.html points at /sigil.svg for the favicon and
-  src/guild.js exports the same path for in-app use.
-
-  It doubles as a 16px favicon, so the shapes are deliberately heavy and few;
-  anything finer disappears in a browser tab.
--->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Guild sigil">
-  <title>Guild sigil</title>
-  <path
-    d="M32 3 58 12v22c0 13.5-10.4 23.3-26 27C16.4 57.3 6 47.5 6 34V12L32 3z"
-    fill="#1e293b"
-    stroke="#c8a35a"
-    stroke-width="3"
-    stroke-linejoin="round"
-  />
-  <path d="M32 17 41 43H36l-1.7-5.4h-4.6L28 43h-5l9-26z" fill="#c8a35a" />
+<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#c9973a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+  <path d="M50 5 L93 17 V58 C93 86 74 103 50 115 C26 103 7 86 7 58 V17 Z"/>
+  <path d="M24 52 L50 33 L76 52"/>
+  <path d="M30 70 L50 55 L70 70" opacity="0.85"/>
+  <path d="M50 80 L54 89 L50 99 L46 89 Z" fill="#c9973a" stroke="none"/>
 </svg>

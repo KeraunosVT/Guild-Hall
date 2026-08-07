@@ -2,12 +2,7 @@
 // /api/loa routes and the /loa Discord command so both write through the
 // same validation instead of maintaining it twice.
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-// Timezone and rollover come from shared/guild.json — the same per-guild
-// config file the branding lives in — so another guild re-theming this app
-// isn't silently stuck on US Eastern. Fallbacks keep an older guild.json
-// (without these keys) working unchanged.
-const GUILD_IDENTITY = require('../shared/guild.json');
-const GUILD_TZ = GUILD_IDENTITY.timezone || 'America/New_York';
+const GUILD_TZ = 'America/New_York';
 
 // A guild night doesn't end at midnight. The 12:30am Guild Field Boss is the
 // tail of the previous evening's block, not the start of a new day — the
@@ -17,17 +12,14 @@ const GUILD_TZ = GUILD_IDENTITY.timezone || 'America/New_York';
 // Anything before this wall-clock time counts as the night before. It has to
 // sit after the guild's latest event (12:30am) and before the earliest of the
 // following evening, which leaves the small hours free; 01:00 is the line.
+const GUILD_DAY_START = '01:00';
+const GUILD_DAY_START_MIN = 60;
 const MINUTES_PER_DAY = 1440;
 
 const minutesOf = (hhmm) => {
   const [h, m] = String(hhmm).split(':').map(Number);
   return h * 60 + m;
 };
-
-const GUILD_DAY_START = /^\d{2}:\d{2}$/.test(GUILD_IDENTITY.dayStart || '')
-  ? GUILD_IDENTITY.dayStart
-  : '01:00';
-const GUILD_DAY_START_MIN = minutesOf(GUILD_DAY_START);
 
 // Where a wall-clock time falls within the guild night, as minutes from its
 // start. Times before the rollover are pushed past the previous evening's, so

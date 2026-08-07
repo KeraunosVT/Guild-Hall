@@ -1,9 +1,8 @@
 {
-  "name": "guild-hall",
+  "name": "gear-gap",
   "version": "1.0.0",
   "scripts": {
     "start": "node backend/server.js",
     "postinstall": "rm -rf backend/node_modules frontend/node_modules && cd backend && npm install && cd ../frontend && npm install && npm run build"
-  },
-  "license": "AGPL-3.0-only"
+  }
 }

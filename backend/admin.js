@@ -315,6 +315,92 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     res.json({ ok: true });
   });
 
+  // Backfill historical Lucent/shard grants from a CSV, mirroring the gear-award
+  // importer above — same header aliasing, same "resolve names, report per-row
+  // reasons, insert what's valid" contract, so one spreadsheet convention covers
+  // both halves of the loot ledger.
+  router.post('/currency-awards/import', upload.single('file'), async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
+    const f = req.file;
+    if (!f) return res.status(400).json({ error: 'CSV file required.' });
+
+    const HEADER_MAP = {
+      member: 'member', player: 'member', name: 'member', recipient: 'member', winner: 'member',
+      currency: 'currency', type: 'currency', kind: 'currency', shard: 'currency',
+      amount: 'amount', qty: 'amount', quantity: 'amount', value: 'amount', lucent: 'amount',
+      date: 'date', awarded_at: 'date', awardedat: 'date', 'awarded at': 'date',
+      awarded_by: 'awarded_by', awardedby: 'awarded_by', 'awarded by': 'awarded_by', by: 'awarded_by',
+      reason: 'reason', note: 'reason', notes: 'reason', comment: 'reason',
+    };
+    const parsed = Papa.parse(f.buffer.toString('utf8'), {
+      header: true, skipEmptyLines: true,
+      transformHeader: (h) => HEADER_MAP[h.trim().toLowerCase()] || h.trim().toLowerCase(),
+    });
+    if (parsed.errors?.length) return res.status(400).json({ error: 'Could not parse CSV: ' + parsed.errors[0].message });
+
+    const [discordMembers, ids] = await Promise.all([
+      listMembers().catch(() => []),
+      identities.load(),
+    ]);
+    const discordByMemberName = new Map();
+    discordMembers.forEach((m) => { if (m.name) discordByMemberName.set(norm(m.name), m.id); });
+
+    // Accept either the storage key ("tevent_ashen") or the human label
+    // ("Tevent Ashen") — a spreadsheet kept by hand will have the label, and
+    // rejecting it would make the importer useless for the data people actually
+    // have. Blank defaults to lucent, which is the overwhelming majority.
+    const currencyByKey = new Map([['lucent', 'lucent'], ...SHARDS.types.map((t) => [t.key, t.key])]);
+    const currencyByLabel = new Map([['lucent', 'lucent'], ...SHARDS.types.map((t) => [norm(t.label), t.key])]);
+    const resolveCurrency = (raw) => {
+      if (!raw) return 'lucent';
+      const n = norm(raw);
+      return currencyByKey.get(n) || currencyByLabel.get(n) || null;
+    };
+
+    const errors = [];
+    const toInsert = [];
+    (parsed.data || []).forEach((raw, idx) => {
+      const rowNum = idx + 2; // account for the header row
+      const memberRaw = clean(raw.member);
+      if (!memberRaw) { errors.push({ row: rowNum, reason: 'Missing member.' }); return; }
+
+      const discordId = ids.discordIdFor(memberRaw) || discordByMemberName.get(norm(memberRaw));
+      if (!discordId) { errors.push({ row: rowNum, reason: `Unknown member "${memberRaw}".` }); return; }
+
+      const currency = resolveCurrency(clean(raw.currency));
+      if (!currency) { errors.push({ row: rowNum, reason: `Unknown currency "${clean(raw.currency)}".` }); return; }
+
+      // Tolerate "12,500" and "12500 lucent" — hand-kept sheets have both.
+      const amt = parseInt(String(raw.amount ?? '').replace(/[^0-9-]/g, ''), 10);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        errors.push({ row: rowNum, reason: `Amount must be a positive number (got "${clean(raw.amount) ?? ''}").` });
+        return;
+      }
+
+      const dateRaw = clean(raw.date);
+      const parsedDate = dateRaw ? new Date(dateRaw) : null;
+      const awardedAt = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : new Date().toISOString();
+
+      toInsert.push({
+        id: crypto.randomUUID(),
+        discord_id: String(discordId),
+        display_name: memberRaw,
+        currency,
+        amount: amt,
+        reason: cleanReason(raw.reason),
+        awarded_by: clean(raw.awarded_by) || req.user.username || req.user.id,
+        awarded_at: awardedAt,
+      });
+    });
+
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from('currency_awards').insert(toInsert);
+      if (error) return res.status(500).json({ error: 'Failed to import grants: ' + error.message });
+    }
+
+    res.json({ imported: toInsert.length, skipped: errors.length, errors: errors.slice(0, 50) });
+  });
+
   router.delete('/currency-awards/:id', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const { error } = await supabase.from('currency_awards').delete().eq('id', req.params.id);
@@ -430,6 +516,26 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       const grantId = crypto.randomUUID();
       const amt = update.amount ?? existing.amount;
       const itemLabel = update.item_name ?? existing.item_name;
+
+      // Claim the row BEFORE writing the grant, with the null check in the
+      // UPDATE itself so Postgres arbitrates. Reading currency_award_id and
+      // then inserting only rules out the sequential case: two officers
+      // clicking "mark paid" together both read null and both mint a grant, and
+      // the member is paid twice. A conditional update can only succeed once.
+      const { data: claimed, error: claimErr } = await supabase
+        .from('lucent_requests')
+        .update({ currency_award_id: grantId })
+        .eq('id', req.params.id)
+        .is('currency_award_id', null)
+        .select('id');
+      if (claimErr) {
+        console.error('Lucent request claim error:', claimErr.message);
+        return res.status(500).json({ error: 'Could not mark this request paid.' });
+      }
+      if (!claimed || claimed.length === 0) {
+        return res.status(409).json({ error: 'This request was just marked paid by someone else.' });
+      }
+
       const { error: gErr } = await supabase.from('currency_awards').insert({
         id: grantId, discord_id: existing.discord_id, display_name: existing.display_name,
         currency: 'lucent', amount: amt,
@@ -437,12 +543,15 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
         awarded_by: req.user.username || req.user.id,
         awarded_at: new Date().toISOString(),
       });
-      // Without the grant the request isn't really paid, so don't say it is.
+      // Without the grant the request isn't really paid, so release the claim
+      // rather than leaving a row pointing at a grant that was never written.
       if (gErr) {
         console.error('Lucent request grant error:', gErr.message);
+        await supabase.from('lucent_requests')
+          .update({ currency_award_id: null }).eq('id', req.params.id);
         return res.status(500).json({ error: 'Could not record the Lucent grant, so the request was left unpaid.' });
       }
-      update.currency_award_id = grantId;
+      // Already written by the claim above; don't rewrite it in the final update.
     }
 
     const { error } = await supabase.from('lucent_requests').update(update).eq('id', req.params.id);
@@ -717,9 +826,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     try {
       const [counts, ids] = await Promise.all([
-        // Guild scoping passed in — same reason as server.js's RPC calls: the
-        // SQL function stays guild-agnostic and reads nothing hardcoded.
-        supabase.rpc('get_guild_player_counts', { p_guild_names: GUILD_IDENTITY.aliases }),
+        supabase.rpc('get_guild_player_counts'),
         identities.load(),
       ]);
       if (counts.error) throw counts.error;

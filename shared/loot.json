@@ -1,0 +1,319 @@
+{
+  "priorities": [
+    "PvP",
+    "Second Build",
+    "PvE"
+  ],
+  "categories": [
+    {
+      "key": "sns",
+      "label": "SnS",
+      "items": [
+        {
+          "key": "sns__ahzreil_sns_for_contri_templars",
+          "name": "Ahzreil sns for Contri Templars"
+        },
+        {
+          "key": "sns__deluzhnoa_s_edge_of_eternal_frost",
+          "name": "Deluzhnoa's Edge of Eternal Frost"
+        }
+      ]
+    },
+    {
+      "key": "greatswords",
+      "label": "Greatswords",
+      "items": [
+        {
+          "key": "greatswords__morokai_s_soulfire_greatblade",
+          "name": "Morokai's Soulfire Greatblade"
+        },
+        {
+          "key": "greatswords__cordy_s_warblade_of_creeping_doom",
+          "name": "Cordy's Warblade of Creeping Doom"
+        }
+      ]
+    },
+    {
+      "key": "daggers",
+      "label": "Daggers",
+      "items": [
+        {
+          "key": "daggers__tevent_s_fangs_of_fury",
+          "name": "Tevent's Fangs of Fury"
+        },
+        {
+          "key": "daggers__deluzhnoa_s_permafrost_razors",
+          "name": "Deluzhnoa's Permafrost Razors"
+        }
+      ]
+    },
+    {
+      "key": "longbows",
+      "label": "Longbows",
+      "items": [
+        {
+          "key": "longbows__grand_aelon_s_longbow_of_blight",
+          "name": "Grand Aelon's Longbow of Blight"
+        },
+        {
+          "key": "longbows__tevent_s_arc_of_wailing_death",
+          "name": "Tevent's Arc of Wailing Death"
+        },
+        {
+          "key": "longbows__deluzhnoa_s_arc_of_frozen_death",
+          "name": "Deluzhnoa's Arc of Frozen Death"
+        }
+      ]
+    },
+    {
+      "key": "xbows",
+      "label": "Xbows",
+      "items": [
+        {
+          "key": "xbows__cordy_xbow",
+          "name": "Cordy Xbow"
+        },
+        {
+          "key": "xbows__kowazan_s_crossbows_of_the_eclipse",
+          "name": "Kowazan's Crossbows of the Eclipse"
+        },
+        {
+          "key": "xbows__malakar_s_flamespike_crossbows",
+          "name": "Malakar's Flamespike Crossbows"
+        },
+        {
+          "key": "xbows__akmans_bloodletting_crossbows",
+          "name": "Akmans bloodletting crossbows"
+        }
+      ]
+    },
+    {
+      "key": "wands",
+      "label": "Wands",
+      "items": [
+        {
+          "key": "wands__tevent_s_grasp_of_withering",
+          "name": "Tevent's Grasp of Withering"
+        },
+        {
+          "key": "wands__cordy_s_grasp_of_manipulation",
+          "name": "Cordy's Grasp of Manipulation"
+        },
+        {
+          "key": "wands__excavator",
+          "name": "Excavator"
+        }
+      ]
+    },
+    {
+      "key": "staffs",
+      "label": "Staffs",
+      "items": [
+        {
+          "key": "staffs__deluzhnoa_s_ancient_petrified_staff",
+          "name": "Deluzhnoa's Ancient Petrified Staff"
+        },
+        {
+          "key": "staffs__aridus_staff",
+          "name": "Aridus Staff"
+        }
+      ]
+    },
+    {
+      "key": "spears",
+      "label": "Spears",
+      "items": [
+        {
+          "key": "spears__deluznoa_s_serrated_shard",
+          "name": "Deluznoa's Serrated Shard"
+        }
+      ]
+    },
+    {
+      "key": "orbs",
+      "label": "Orbs",
+      "items": [
+        {
+          "key": "orbs__talus_s_transcendent_core",
+          "name": "Talus's Transcendent Core"
+        },
+        {
+          "key": "orbs__cordy_s_source_of_contagion",
+          "name": "Cordy's Source of Contagion"
+        },
+        {
+          "key": "orbs__tevent_s_blazing_pupil",
+          "name": "Tevent's Blazing Pupil"
+        }
+      ]
+    },
+    {
+      "key": "cloaks",
+      "label": "Cloaks",
+      "items": [
+        {
+          "key": "cloaks__breath_of_boundless_sky",
+          "name": "Breath of Boundless Sky"
+        },
+        {
+          "key": "cloaks__cloak_of_piercing_ice",
+          "name": "Cloak of Piercing Ice"
+        },
+        {
+          "key": "cloaks__frozen_expanse",
+          "name": "Frozen Expanse"
+        }
+      ]
+    },
+    {
+      "key": "errant_scion_armor",
+      "label": "Errant Scion Armor",
+      "items": [
+        {
+          "key": "errant_scion_armor__helmet",
+          "name": "Helmet"
+        }
+      ]
+    },
+    {
+      "key": "crimson_armor",
+      "label": "Crimson Armor",
+      "items": [
+        {
+          "key": "crimson_armor__chest",
+          "name": "Chest"
+        }
+      ]
+    },
+    {
+      "key": "umbral_armor",
+      "label": "Umbral Armor",
+      "items": [
+        {
+          "key": "umbral_armor__pants",
+          "name": "Pants"
+        }
+      ]
+    },
+    {
+      "key": "veiled_armor",
+      "label": "Veiled Armor",
+      "items": [
+        {
+          "key": "veiled_armor__gloves",
+          "name": "Gloves"
+        }
+      ]
+    },
+    {
+      "key": "necklaces",
+      "label": "Necklaces",
+      "items": [
+        {
+          "key": "necklaces__necklace_of_dawn_s_light",
+          "name": "Necklace of Dawn's Light"
+        },
+        {
+          "key": "necklaces__necklace_of_exceptional_greed",
+          "name": "Necklace of Exceptional Greed"
+        },
+        {
+          "key": "necklaces__undying_star_necklace",
+          "name": "Undying Star Necklace"
+        },
+        {
+          "key": "necklaces__lunar_conjunction",
+          "name": "Lunar Conjunction"
+        },
+        {
+          "key": "necklaces__extinction_proof_periapt",
+          "name": "Extinction-proof Periapt"
+        }
+      ]
+    },
+    {
+      "key": "bracelets",
+      "label": "Bracelets",
+      "items": [
+        {
+          "key": "bracelets__bracelet_of_evening_tide",
+          "name": "Bracelet of Evening Tide"
+        },
+        {
+          "key": "bracelets__bracelet_of_radiant_chains",
+          "name": "Bracelet of Radiant Chains"
+        }
+      ]
+    },
+    {
+      "key": "rings",
+      "label": "Rings",
+      "items": [
+        {
+          "key": "rings__ring_of_stalwart_determination",
+          "name": "Ring of Stalwart Determination"
+        },
+        {
+          "key": "rings__ring_of_forbidden_lust",
+          "name": "Ring of Forbidden Lust"
+        },
+        {
+          "key": "rings__signet_of_the_alpha",
+          "name": "Signet of the Alpha"
+        },
+        {
+          "key": "rings__coil_of_righteous_demand",
+          "name": "Coil of Righteous Demand"
+        },
+        {
+          "key": "rings__soaring_emblem_ring",
+          "name": "Soaring Emblem Ring"
+        }
+      ]
+    },
+    {
+      "key": "belts",
+      "label": "Belts",
+      "items": [
+        {
+          "key": "belts__belt_of_clutching_fear",
+          "name": "Belt of Clutching Fear"
+        }
+      ]
+    },
+    {
+      "key": "brooches",
+      "label": "Brooches",
+      "items": [
+        {
+          "key": "brooches__hit_chance",
+          "name": "Hit Chance"
+        },
+        {
+          "key": "brooches__evasion",
+          "name": "Evasion"
+        },
+        {
+          "key": "brooches__crit",
+          "name": "Crit"
+        },
+        {
+          "key": "brooches__endurance",
+          "name": "Endurance"
+        },
+        {
+          "key": "brooches__heavy_attack",
+          "name": "Heavy Attack"
+        },
+        {
+          "key": "brooches__heavy_attack_evasion",
+          "name": "Heavy Attack Evasion"
+        },
+        {
+          "key": "brooches__brooch_of_primacy",
+          "name": "Brooch of Primacy"
+        }
+      ]
+    }
+  ]
+}

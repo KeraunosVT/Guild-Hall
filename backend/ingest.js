@@ -11,7 +11,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 // Model names churn — keep this swappable without a code change.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 // Optional reference legend image sent as image 1 on every screenshot read.
-const LEGEND_PATH = process.env.WEAPON_LEGEND_PATH || path.join(__dirname, 'assets', 'weapon_legend.png');
+const LEGEND_PATH = process.env.WEAPON_LEGEND_PATH || path.join(__dirname, 'assets', 'weapon-legend.png');
 
 // The exact weapon tokens our class map understands ("Unknown" is allowed when
 // the icon can't be identified, and gets flagged for review).
@@ -26,7 +26,11 @@ function getLegendPart() {
     const ext = path.extname(LEGEND_PATH).toLowerCase();
     const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
     _legendPart = { inlineData: { mimeType, data: data.toString('base64') } };
-  } catch {
+  } catch (err) {
+    // Warn once. This silently returned null for every parse, so a mistyped
+    // path or missing file degraded weapon detection invisibly — the prompt
+    // still asked Gemini to compare against a legend that was never attached.
+    console.warn(`⚠️  Weapon legend not loaded from ${LEGEND_PATH} (${err.code || err.message}) — weapon detection will be less accurate. Set WEAPON_LEGEND_PATH to override.`);
     _legendPart = null;
   }
   return _legendPart;

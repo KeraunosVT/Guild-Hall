@@ -1,5 +1,5 @@
 {
-  "name": "guild-hall-backend",
+  "name": "gear-gap-backend",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
@@ -19,6 +19,5 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "papaparse": "^5.5.3"
-  },
-  "license": "AGPL-3.0-only"
+  }
 }
