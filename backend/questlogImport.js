@@ -70,6 +70,19 @@ function trimDetail(d) {
   };
 }
 
+// DELIBERATELY UNSCOPED — do not convert to tenantDb.
+//
+// questlog_items is game reference data scraped from an external source: the
+// same item ids, names and icons for every guild on the deployment. It is one
+// of only two tables Phase 1 left without a guild_id (the other is
+// market_potentials), so tenantDb.from('questlog_items') throws by design —
+// see GLOBAL_TABLES in tenantDb.js.
+//
+// This also means the import is a deployment-wide operation, not a per-guild
+// one: any guild triggering it refreshes the shared catalog for everybody.
+// That's intended (it saves re-scraping the same public data N times), but it
+// makes the route worth rate-limiting once there are real tenants — one guild
+// can currently make the whole deployment re-crawl.
 module.exports = async function runImport(supabase) {
   const start = Date.now();
   const errors = [];

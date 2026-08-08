@@ -10,6 +10,8 @@
 // on a failed first load it serves an empty one — names simply fall back to
 // whatever the caller already had, instead of 500ing the page.
 
+const { tenantDb } = require('./tenantDb');
+
 const CACHE_TTL_MS = (parseInt(process.env.IDENTITY_CACHE_SECONDS, 10) || 30) * 1000;
 
 const norm = (s) => (s || '').trim().toLowerCase();
@@ -43,12 +45,21 @@ function buildSnapshot(rows) {
 const EMPTY = buildSnapshot([]);
 
 module.exports = function createIdentities(supabase) {
-  let cache = null;      // last good snapshot
-  let cacheAt = 0;
-  let inFlight = null;   // Promise while a fetch is running
+  // ONE ENTRY PER GUILD. This was a single snapshot shared by the whole
+  // process, which in a multi-tenant deployment is a data leak rather than a
+  // stale-cache bug: guild B would resolve names against guild A's identity
+  // table and get A's display names and discord ids back. Keying by guildId is
+  // plan task 8 — the same audit applies to every module-level `let cache`.
+  const perGuild = new Map(); // guildId -> { cache, cacheAt, inFlight }
 
-  async function fetchSnapshot() {
-    const { data, error } = await supabase
+  const stateFor = (guildId) => {
+    let st = perGuild.get(guildId);
+    if (!st) { st = { cache: null, cacheAt: 0, inFlight: null }; perGuild.set(guildId, st); }
+    return st;
+  };
+
+  async function fetchSnapshot(guildId) {
+    const { data, error } = await tenantDb(supabase, guildId)
       .from('player_identities')
       .select('id, display_name, ingame_names, discord_id');
     if (error) throw new Error(error.message);
@@ -58,28 +69,38 @@ module.exports = function createIdentities(supabase) {
   return {
     norm,
 
-    async load() {
-      if (cache && Date.now() - cacheAt < CACHE_TTL_MS) return cache;
-      if (inFlight) return inFlight;
-      inFlight = fetchSnapshot()
+    async load(guildId) {
+      // No guild means no snapshot to serve. Returning EMPTY rather than
+      // throwing keeps load()'s never-throws contract, and an empty snapshot
+      // degrades to "names pass through unchanged" — the same fallback a failed
+      // fetch already uses, and never another guild's data.
+      if (!guildId) { console.error('identities.load called without a guildId'); return EMPTY; }
+
+      const st = stateFor(guildId);
+      if (st.cache && Date.now() - st.cacheAt < CACHE_TTL_MS) return st.cache;
+      if (st.inFlight) return st.inFlight;
+      st.inFlight = fetchSnapshot(guildId)
         .then((snap) => {
-          cache = snap;
-          cacheAt = Date.now();
+          st.cache = snap;
+          st.cacheAt = Date.now();
           return snap;
         })
         .catch((err) => {
           console.error('identities load failed:', err.message);
-          return cache || EMPTY; // stale beats broken; empty beats 500
+          return st.cache || EMPTY; // stale beats broken; empty beats 500
         })
-        .finally(() => { inFlight = null; });
-      return inFlight;
+        .finally(() => { st.inFlight = null; });
+      return st.inFlight;
     },
 
     // Call after any write to player_identities so the next load() refetches.
     // Only the TTL is expired — the old snapshot is kept as the stale fallback
-    // in case that refetch fails.
-    invalidate() {
-      cacheAt = 0;
+    // in case that refetch fails. Scoped to one guild: a write in guild A must
+    // not throw away guild B's warm cache.
+    invalidate(guildId) {
+      if (!guildId) { perGuild.clear(); return; }
+      const st = perGuild.get(guildId);
+      if (st) st.cacheAt = 0;
     },
   };
 };

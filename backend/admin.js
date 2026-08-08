@@ -118,7 +118,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       if (supabase) {
         const [{ data: roleData, error: roleError }, ids] = await Promise.all([
           supabase.from('member_roles').select('discord_id, pvp_role, pve_role, pvp_classes, pve_classes'),
-          identities.load(),
+          identities.load(req.guildId),
         ]);
         if (roleError) console.error('member_roles load error:', roleError.message);
         const roleMap = {};
@@ -165,7 +165,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const [{ data, error }, ids] = await Promise.all([
       supabase.from('gear_levels').select('*'),
-      identities.load(),
+      identities.load(req.guildId),
     ]);
     if (error) return res.status(500).json({ error: 'Failed to load gear levels.' });
     const entries = (data || []).map((e) => ({
@@ -188,7 +188,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const [{ data, error }, ids] = await Promise.all([
       supabase.from('loot_awards').select('*').order('awarded_at', { ascending: false }),
-      identities.load(),
+      identities.load(req.guildId),
     ]);
     if (error) return res.status(500).json({ error: 'Failed to load awards.' });
     const awards = (data || []).map((a) => ({
@@ -246,7 +246,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const [{ data, error }, ids] = await Promise.all([
       supabase.from('currency_awards').select('*').order('awarded_at', { ascending: false }),
-      identities.load(),
+      identities.load(req.guildId),
     ]);
     if (error) return res.status(500).json({ error: 'Failed to load currency grants.' });
     const awards = (data || []).map((a) => ({
@@ -348,7 +348,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const [{ data, error }, ids] = await Promise.all([
       supabase.from('lucent_requests').select('*').order('requested_at', { ascending: false }),
-      identities.load(),
+      identities.load(req.guildId),
     ]);
     if (error) return res.status(500).json({ error: 'Failed to load Lucent requests.' });
     res.json({
@@ -521,7 +521,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const [catalog, discordMembers, ids] = await Promise.all([
       lootCatalog.getCatalog(),
       listMembers().catch(() => []),
-      identities.load(),
+      identities.load(req.guildId),
     ]);
 
     const itemByKey = new Map();
@@ -749,7 +749,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
         // Guild scoping passed in — same reason as server.js's RPC calls: the
         // SQL function stays guild-agnostic and reads nothing hardcoded.
         supabase.rpc('get_guild_player_counts', { p_guild_names: GUILD_IDENTITY.aliases }),
-        identities.load(),
+        identities.load(req.guildId),
       ]);
       if (counts.error) throw counts.error;
       const identityRows = ids.rows;
@@ -791,7 +791,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const { error } = await supabase.from('player_identities')
       .update({ ingame_names: arr, updated_at: new Date().toISOString() }).eq('id', req.params.id);
     if (error) return res.status(500).json({ error: 'Failed to add alias.' });
-    identities.invalidate();
+    identities.invalidate(req.guildId);
     res.json({ ok: true });
   });
 
@@ -806,7 +806,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const { error } = await supabase.from('player_identities')
       .update({ ingame_names: arr, updated_at: new Date().toISOString() }).eq('id', req.params.id);
     if (error) return res.status(500).json({ error: 'Failed to remove alias.' });
-    identities.invalidate();
+    identities.invalidate(req.guildId);
     res.json({ ok: true });
   });
 
@@ -818,7 +818,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       .update({ discord_id: discord_id || null, updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
     if (error) return res.status(500).json({ error: 'Failed to link Discord account.' });
-    identities.invalidate();
+    identities.invalidate(req.guildId);
     res.json({ ok: true });
   });
 
@@ -831,7 +831,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       .update({ display_name: String(display_name).trim().slice(0, 120), updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
     if (error) return res.status(500).json({ error: 'Failed to rename identity.' });
-    identities.invalidate();
+    identities.invalidate(req.guildId);
     res.json({ ok: true });
   });
 
@@ -840,7 +840,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const { error } = await supabase.from('player_identities').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ error: 'Failed to delete identity.' });
-    identities.invalidate();
+    identities.invalidate(req.guildId);
     res.json({ ok: true });
   });
 
@@ -855,7 +855,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const { error } = await supabase.from('player_identities')
       .insert({ id, display_name: String(display_name).slice(0, 120), ingame_names: aliases, created_at: now, updated_at: now });
     if (error) return res.status(500).json({ error: 'Failed to create identity.' });
-    identities.invalidate();
+    identities.invalidate(req.guildId);
     res.json({ id });
   });
 
@@ -1118,7 +1118,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     // Prefer the guild's mapped display name (player_identities) over whatever
     // nickname/username Discord happens to show, same as /api/admin/members.
     if (supabase && members.length > 0) {
-      const ids = await identities.load();
+      const ids = await identities.load(req.guildId);
       members.forEach((m) => { m.name = ids.displayNameFor(m.id, m.name); });
     }
     res.json({ members });
@@ -1165,9 +1165,9 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (event.event_date && loa) {
       try {
         const [unavailable, roster, ids] = await Promise.all([
-          loa.unavailableOn({ date: event.event_date, eventScheduleId: event.event_schedule_id || null }),
+          loa.unavailableOn(req.guild, { date: event.event_date, eventScheduleId: event.event_schedule_id || null }),
           listMembers(),
-          identities.load(),
+          identities.load(req.guildId),
         ]);
         const present = new Set((attendees || []).map((a) => String(a.discord_id)));
         const excusedBy = new Map(unavailable.map((u) => [String(u.discord_id), u]));
@@ -1197,7 +1197,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
     let result;
     try {
-      result = await attendance.createEvent({
+      result = await attendance.createEvent(req.guild, {
         title, eventDate: event_date, eventScheduleId: event_schedule_id, attendees,
       });
     } catch (err) {
@@ -1215,7 +1215,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // display names against player_identities — updates any that now have a mapping.
   router.post('/attendance/backfill-names', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-    const ids = await identities.load();
+    const ids = await identities.load(req.guildId);
 
     const { data: rows, error: rErr } = await supabase.from('event_attendance').select('id, discord_id, display_name');
     if (rErr) return res.status(500).json({ error: 'Failed to load attendance records.' });
@@ -1414,9 +1414,9 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // loa.all() exposes it.
   router.get('/loa/unavailable', async (req, res) => {
     if (!loa) return res.status(503).json({ error: 'Database not configured.' });
-    const date = req.query.date || todayInGuildTz();
+    const date = req.query.date || todayInGuildTz(req.guild);
     try {
-      const unavailable = await loa.unavailableOn({ date, eventScheduleId: req.query.event || null });
+      const unavailable = await loa.unavailableOn(req.guild, { date, eventScheduleId: req.query.event || null });
       res.json({ date, unavailable });
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message || 'Failed to load LOAs.' });

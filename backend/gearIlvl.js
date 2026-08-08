@@ -2,6 +2,7 @@
 // Throne & Liberty "Equipment Level" info window screenshot (Gemini vision),
 // and persists one entry per member (a new submission replaces their previous one).
 const { GoogleGenAI, Type } = require('@google/genai');
+const { tenantDb } = require('./tenantDb');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -75,6 +76,16 @@ async function parseGearScreenshot(buffer, mimeType) {
 
 const MAX_LEVEL = 80;
 
+// Multi-tenant note: this factory is built ONCE at boot, so it cannot close
+// over a guild — the guild belongs to the request. Every method that touches
+// the database therefore takes `guildId` as its first argument and builds a
+// scoped client from it. Callers pass req.guildId.
+//
+// gear_levels is one of the tables whose primary key Phase 1 widened from
+// `discord_id` to `(guild_id, discord_id)`, so the same member can hold a
+// separate gear entry in each guild they belong to. That makes guild scoping a
+// correctness requirement here, not just an isolation one: an unscoped lookup
+// on discord_id alone can now match another guild's row.
 module.exports = function createGearIlvl(supabase) {
   return {
     parseGearScreenshot,
@@ -84,7 +95,8 @@ module.exports = function createGearIlvl(supabase) {
     // accessory all hit MAX_LEVEL) and then left alone on every later
     // resubmission, so members at the cap keep the order they actually
     // achieved it in rather than being reshuffled by later screenshots.
-    async submit(discordId, displayName, extracted) {
+    async submit(guildId, discordId, displayName, extracted) {
+      const db = tenantDb(supabase, guildId);
       const isMaxed = extracted.weapon === MAX_LEVEL && extracted.armor === MAX_LEVEL && extracted.accessory === MAX_LEVEL;
       const row = {
         discord_id: discordId,
@@ -96,38 +108,42 @@ module.exports = function createGearIlvl(supabase) {
         submitted_at: new Date().toISOString(),
       };
       if (isMaxed) {
-        const { data: existing } = await supabase.from('gear_levels').select('maxed_at').eq('discord_id', discordId).single();
+        const { data: existing } = await db.from('gear_levels').select('maxed_at').eq('discord_id', discordId).single();
         row.maxed_at = existing?.maxed_at || new Date().toISOString();
       }
-      const { error } = await supabase.from('gear_levels').upsert(row, { onConflict: 'discord_id' });
+      // onConflict must name the full composite key. With just 'discord_id' the
+      // upsert matches on a constraint that no longer exists, so it would fail
+      // outright rather than updating this guild's row.
+      const { error } = await db.from('gear_levels').upsert(row, { onConflict: 'guild_id,discord_id' });
       if (error) throw new Error(error.message);
 
       // Append-only log, separate from the upserted "current" row above — this
       // is what lets a member's gear progression be viewed over time instead
       // of only ever showing their latest submission.
       const { maxed_at, ...historyRow } = row;
-      await supabase.from('gear_level_history').insert(historyRow).then(({ error: histErr }) => {
+      await db.from('gear_level_history').insert(historyRow).then(({ error: histErr }) => {
         if (histErr) console.error('gear_level_history insert failed:', histErr.message);
       });
 
       return row;
     },
 
-    async historyForMember(discordId) {
-      const { data, error } = await supabase.from('gear_level_history')
+    async historyForMember(guildId, discordId) {
+      const { data, error } = await tenantDb(supabase, guildId).from('gear_level_history')
         .select('*').eq('discord_id', discordId).order('submitted_at', { ascending: false });
       if (error) { console.error('gearIlvl.historyForMember error:', error.message); return []; }
       return data || [];
     },
 
-    async forMember(discordId) {
-      const { data, error } = await supabase.from('gear_levels').select('*').eq('discord_id', discordId).single();
+    async forMember(guildId, discordId) {
+      const { data, error } = await tenantDb(supabase, guildId)
+        .from('gear_levels').select('*').eq('discord_id', discordId).single();
       if (error) return null;
       return data;
     },
 
-    async all() {
-      const { data, error } = await supabase.from('gear_levels').select('*');
+    async all(guildId) {
+      const { data, error } = await tenantDb(supabase, guildId).from('gear_levels').select('*');
       if (error) { console.error('gearIlvl.all error:', error.message); return []; }
       return data || [];
     },

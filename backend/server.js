@@ -15,6 +15,7 @@ const {
   router: authRouter, requireAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
 } = require('./auth');
 const { listMembers } = require('./discord');
+const createGuildContext = require('./guildContext');
 const SHARDS = require('../shared/shards.json');
 const BOSS_WEAPONS = require('../shared/archbossWeapons.json');
 const BUILDS = ['PvP', 'PvE'];
@@ -110,6 +111,9 @@ const gearIlvl = supabase ? createGearIlvl(supabase) : null;
 const identities = supabase ? createIdentities(supabase) : null;
 const loa = supabase ? createLoa(supabase) : null;
 const auditLog = supabase ? createAuditLog(supabase) : null;
+// Guild resolution needs the client to read the tenant registry, so it's built
+// here alongside the other factories rather than imported as a bare middleware.
+const { resolveGuildOrSingle } = createGuildContext(supabase);
 
 // The gateway needs Supabase for /elitetimer persistence, so start it after setup.
 gateway.start(supabase);
@@ -198,11 +202,20 @@ app.post('/api/early-access', earlyAccessLimiter, async (req, res) => {
 // Discord login routes (public)
 app.use('/api/auth', authRouter);
 
-// Everything else under /api requires a valid guild-member session.
-// Full login wall: stats, matches, and match detail are all gated.
+// Everything else under /api requires a valid guild-member session, and then a
+// resolved guild. Full login wall: stats, matches, and match detail are gated.
+//
+// The two run CHAINED, never swapped: resolveGuildOrSingle reads req.user to
+// prove the caller belongs to the guild they asked for, so it is meaningless
+// without requireAuth having populated req.user first — and putting it in place
+// of requireAuth drops the login wall on every route below.
+//
+// In single-tenant mode (SINGLE_GUILD_ID set) resolution just pins that guild,
+// so this works against the current session shape unchanged; multi-guild mode
+// additionally needs the session to carry a guild list (Phase 3, task 10).
 app.use('/api', (req, res, next) => {
   if (req.path === '/health' || req.path.startsWith('/auth')) return next();
-  return requireAuth(req, res, next);
+  return requireAuth(req, res, () => resolveGuildOrSingle(req, res, next));
 });
 
 // ── ADMIN AREA (requires a capability) ───────────────────────────────────────
@@ -255,7 +268,7 @@ app.put('/api/my-classes', async (req, res) => {
 app.get('/api/my-profile', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    const ids = await identities.load();
+    const ids = await identities.load(req.guildId);
     const name = ids.displayNameFor(req.user.id, null);
     if (!name) return res.json({ name: null, mapped: false, hasRecord: false });
 
@@ -283,7 +296,7 @@ app.get('/api/my-profile', async (req, res) => {
 // admin-only (see /api/admin/gear-ilvl) — this is just "what's on file for me".
 app.get('/api/gear-ilvl/mine', async (req, res) => {
   if (!gearIlvl) return res.status(503).json({ error: 'Database not configured.' });
-  const entry = await gearIlvl.forMember(req.user.id);
+  const entry = await gearIlvl.forMember(req.guildId, req.user.id);
   res.json({ entry });
 });
 
@@ -295,7 +308,7 @@ app.post('/api/gear-ilvl', gearSubmitLimiter, gearUpload.single('image'), async 
   }
   try {
     const extracted = await gearIlvl.parseGearScreenshot(req.file.buffer, req.file.mimetype);
-    const entry = await gearIlvl.submit(req.user.id, req.user.username, extracted);
+    const entry = await gearIlvl.submit(req.guildId, req.user.id, req.user.username, extracted);
     res.json({ entry });
   } catch (err) {
     console.error('Gear ilvl submit error:', err.message);
@@ -370,7 +383,7 @@ app.get('/api/loot', async (req, res) => {
     const validKeys = await lootCatalog.getKeys();
     const [{ data, error }, ids] = await Promise.all([
       supabase.from('loot_wishlists').select('discord_id, display_name, picks'),
-      identities.load(),
+      identities.load(req.guildId),
     ]);
     if (error) throw error;
     const counts = {};
@@ -452,7 +465,7 @@ app.get('/api/maps', async (req, res) => {
 // ── Elite boss respawn timers (read-only; reported via the /elitetimer Discord command) ──
 app.get('/api/elite-timers', async (req, res) => {
   if (!eliteTimers) return res.status(503).json({ error: 'Database not configured.' });
-  const timers = await eliteTimers.all();
+  const timers = await eliteTimers.all(req.guildId);
   res.json({ timers, locations: eliteTimers.locations });
 });
 
@@ -484,7 +497,7 @@ app.get('/api/maps/stats', async (req, res) => {
 app.get('/api/loa', async (req, res) => {
   if (!loa) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    res.json({ entries: await loa.mine(req.user.id) });
+    res.json({ entries: await loa.mine(req.guild, req.user.id) });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -494,7 +507,7 @@ app.get('/api/loa', async (req, res) => {
 app.get('/api/loa/all', async (req, res) => {
   if (!loa) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    res.json({ entries: await loa.all(userHas(req.user, 'loa.admin')) });
+    res.json({ entries: await loa.all(req.guild, userHas(req.user, 'loa.admin')) });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -512,11 +525,11 @@ app.post('/api/loa', async (req, res) => {
   const targetName = onBehalf ? (display_name || 'Member') : req.user.username;
   try {
     if (type === 'event') {
-      await loa.submitEvent({ discordId: targetId, displayName: targetName, eventDate: event_date, eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
+      await loa.submitEvent(req.guild, { discordId: targetId, displayName: targetName, eventDate: event_date, eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
     } else if (type === 'range') {
-      await loa.submitRange({ discordId: targetId, displayName: targetName, startDate: start_date, endDate: end_date, reason });
+      await loa.submitRange(req.guild, { discordId: targetId, displayName: targetName, startDate: start_date, endDate: end_date, reason });
     } else if (type === 'recurring') {
-      await loa.submitRecurring({ discordId: targetId, displayName: targetName, dayOfWeek: parseInt(day_of_week, 10), eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
+      await loa.submitRecurring(req.guild, { discordId: targetId, displayName: targetName, dayOfWeek: parseInt(day_of_week, 10), eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
     } else {
       return res.status(400).json({ error: 'Type must be "event", "range", or "recurring".' });
     }
@@ -530,7 +543,7 @@ app.post('/api/loa', async (req, res) => {
 app.delete('/api/loa/:id', async (req, res) => {
   if (!loa) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    const { messageId } = await loa.cancel(req.params.id, req.user.id, userHas(req.user, 'loa.admin'));
+    const { messageId } = await loa.cancel(req.guild, req.params.id, req.user.id, userHas(req.user, 'loa.admin'));
     res.json({ ok: true });
     gateway.deleteLoaMessage(messageId);
   } catch (err) {
@@ -560,7 +573,7 @@ app.get('/api/players', async (req, res) => {
       return res.json({ players: hit.players });
     }
 
-    const ids = await identities.load();
+    const ids = await identities.load(req.guildId);
 
     let data;
     let matchIds = null; // null = all-time (no match scoping), set below for the "last N" branch
@@ -714,7 +727,7 @@ app.get('/api/player/:name', async (req, res) => {
     const requestedName = decodeURIComponent(req.params.name).trim();
 
     // Resolve all in-game names this player might appear as via identities.
-    const ids = await identities.load();
+    const ids = await identities.load(req.guildId);
     const identity = ids.identityForName(requestedName);
     let names = [requestedName];
     let displayName = requestedName;
@@ -724,7 +737,7 @@ app.get('/api/player/:name', async (req, res) => {
       names = [identity.display_name, ...(Array.isArray(identity.ingame_names) ? identity.ingame_names : [])].filter(Boolean);
       discordId = identity.discord_id || null;
     }
-    const gearEntry = discordId && gearIlvl ? await gearIlvl.forMember(discordId) : null;
+    const gearEntry = discordId && gearIlvl ? await gearIlvl.forMember(req.guildId, discordId) : null;
 
     // Pull every match row for those names (our guild only).
     const guildNames = Object.keys(GUILD_ALIASES);

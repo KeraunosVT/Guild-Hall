@@ -6,6 +6,7 @@ const createEliteTimers = require('./eliteTimers');
 const createLoa = require('./loa');
 const createIdentities = require('./identities');
 const createAttendance = require('./attendance');
+const guildRegistry = require('./guildRegistry');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -32,7 +33,7 @@ function fmt12h(hhmm) {
 // loa.js's am/pm resolution — bare digits with no am/pm are read as 24-hour,
 // same convention used everywhere else in this file, so the confirmation
 // message always echoes the resolved time back for the officer to sanity-check.
-function parseAnnounceTime(input) {
+function parseAnnounceTime(input, timeZone) {
   let s = String(input || '').trim().replace(/\s*(et|est|edt)$/i, '').trim();
   const compact = /^(\d{1,2})(\d{2})\s*([ap]\.?m\.?)?$/i.exec(s);
   if (compact) s = `${compact[1]}:${compact[2]}${compact[3] ? ` ${compact[3]}` : ''}`;
@@ -40,7 +41,7 @@ function parseAnnounceTime(input) {
   const hhmm = createLoa.parseTimeOfDay(s);
   if (!hhmm) return null;
   const [hour, minute] = hhmm.split(':').map(Number);
-  return createEliteTimers.guildTimeToday(hour, minute);
+  return createEliteTimers.guildTimeToday(hour, minute, timeZone);
 }
 
 let client = null;
@@ -49,8 +50,12 @@ let eliteTimers = null;
 let loa = null;
 let identities = null;
 let attendance = null;
+// Kept so handleInteraction can resolve the tenant registry per interaction;
+// the modules above are built once at boot and no longer carry a guild.
+let db = null;
 
 function start(supabase) {
+  db = supabase;
   if (!BOT_TOKEN || !GUILD_ID) {
     console.warn('⚠️  Discord gateway disabled — BOT_TOKEN or GUILD_ID missing.');
     return;
@@ -203,7 +208,33 @@ async function registerCommands() {
   }
 }
 
+// FIRST THING, ALWAYS: resolve which tenant this interaction belongs to.
+//
+// This is plan task 12. Every handler below reads interaction.guildHall.id to
+// scope its queries, so resolution has to happen before any of them run and has
+// to fail closed — an unregistered or suspended server gets a refusal, never a
+// fallback guild. Attaching the row to the interaction keeps the ~15 handlers
+// from each having to look it up (and from each being a place to forget).
+async function resolveTenant(interaction) {
+  if (!interaction.guildId) return null;         // DMs have no guild
+  const row = await guildRegistry.resolveByDiscordId(db, interaction.guildId);
+  if (row) interaction.guildHall = row;
+  return row;
+}
+
 async function handleInteraction(interaction) {
+  const tenant = await resolveTenant(interaction);
+  if (!tenant) {
+    // Autocomplete cannot show an error, so return an empty list; a command
+    // gets a plain explanation. Either way nothing downstream runs unscoped.
+    if (interaction.isAutocomplete()) return interaction.respond([]).catch(() => {});
+    if (!interaction.isChatInputCommand()) return;
+    return interaction.reply({
+      content: 'This server is not registered with Guild Hall (or its access is suspended).',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+  }
+
   if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === 'elitetimer') return handleReport(interaction);
@@ -224,13 +255,13 @@ async function handleReport(interaction) {
 
   const location = interaction.options.getString('location');
   const timeInput = interaction.options.getString('time');
-  const killedAt = eliteTimers.parseGuildTimeToday(timeInput);
+  const killedAt = eliteTimers.parseGuildTimeToday(timeInput, interaction.guildHall.timezone);
   if (!killedAt) {
     return interaction.editReply(`Couldn't understand "${timeInput}" as a time. Try something like \`6:40pm\`.`);
   }
 
   try {
-    const row = await eliteTimers.report(location, killedAt, interaction.user.username);
+    const row = await eliteTimers.report(interaction.guildHall.id, location, killedAt, interaction.user.username);
     const killedUnix = Math.floor(new Date(row.killed_at).getTime() / 1000);
     const spawnUnix = Math.floor(new Date(row.next_spawn_at).getTime() / 1000);
     // Edit the ephemeral placeholder to a quiet confirmation, then post the actual
@@ -254,7 +285,7 @@ async function handleList(interaction) {
   }
 
   try {
-    const rows = await eliteTimers.all();
+    const rows = await eliteTimers.all(interaction.guildHall.id);
     const byLocation = Object.fromEntries(rows.map((r) => [r.location, r]));
     const now = Date.now();
     const lines = eliteTimers.locations.map((loc) => {
@@ -378,7 +409,7 @@ async function handleLoaEvent(interaction) {
   }
 
   try {
-    const { id, eventName } = await loa.submitEvent({
+    const { id, eventName } = await loa.submitEvent(interaction.guildHall, {
       discordId: target.discordId,
       displayName: target.displayName,
       eventDate: date,
@@ -411,7 +442,7 @@ async function handleLoaRange(interaction) {
   const reason = interaction.options.getString('reason') || '';
 
   try {
-    const { id } = await loa.submitRange({
+    const { id } = await loa.submitRange(interaction.guildHall, {
       discordId: target.discordId,
       displayName: target.displayName,
       startDate, endDate, reason,
@@ -449,7 +480,7 @@ async function handleLoaRecurring(interaction) {
   }
 
   try {
-    const { id, eventName } = await loa.submitRecurring({
+    const { id, eventName } = await loa.submitRecurring(interaction.guildHall, {
       discordId: target.discordId,
       displayName: target.displayName,
       dayOfWeek: dow,
@@ -481,7 +512,7 @@ async function handleLoaCancel(interaction) {
     // Officers can cancel anyone's LOA from Discord (matches the website,
     // where the LOA Board's cancel button shows for admins on any entry);
     // everyone else can only cancel their own, enforced in loa.cancel().
-    const { messageId } = await loa.cancel(id, interaction.user.id, isAdminMember(interaction));
+    const { messageId } = await loa.cancel(interaction.guildHall, id, interaction.user.id, isAdminMember(interaction));
     await interaction.editReply('Cancelled ✅');
     await deleteLoaMessage(messageId);
   } catch (err) {
@@ -502,7 +533,7 @@ async function handleAutocomplete(interaction) {
 async function autocompleteAttendanceEvent(interaction) {
   if (!attendance) return interaction.respond([]).catch(() => {});
   const focused = interaction.options.getFocused().toLowerCase();
-  const events = await attendance.listSchedule();
+  const events = await attendance.listSchedule(interaction.guildHall);
   const choices = events
     .filter((e) => e.name.toLowerCase().includes(focused))
     .slice(0, 25)
@@ -510,8 +541,8 @@ async function autocompleteAttendanceEvent(interaction) {
     // it — an after-midnight event is stored on the next calendar day, so
     // DAY_NAMES[e.day_of_week] alone would name the wrong night.
     .map((e) => {
-      const night = DAY_NAMES[createLoa.guildDayOfWeek(e.day_of_week, e.event_time)];
-      const late = createLoa.isAfterMidnight(e.event_time) ? ' night' : '';
+      const night = DAY_NAMES[createLoa.guildDayOfWeek(e.day_of_week, e.event_time, interaction.guildHall)];
+      const late = createLoa.isAfterMidnight(e.event_time, interaction.guildHall) ? ' night' : '';
       return {
         name: e.event_time ? `${e.name} (${night}${late}, ${fmt12h(e.event_time)})` : `${e.name} (${night})`,
         value: e.id,
@@ -526,7 +557,7 @@ async function autocompleteLoaEvent(interaction) {
   if (!loa.isValidDate(date)) return interaction.respond([]).catch(() => {});
 
   const focused = interaction.options.getFocused().toLowerCase();
-  const events = await loa.eventsForDate(date);
+  const events = await loa.eventsForDate(interaction.guildHall, date);
   if (events.length === 0) {
     return interaction.respond([{ name: '— no events scheduled that day —', value: '' }]).catch(() => {});
   }
@@ -547,7 +578,7 @@ async function autocompleteLoaRecurring(interaction) {
   if (!Number.isInteger(dow) || dow < 0 || dow > 6) return interaction.respond([]).catch(() => {});
 
   const focused = interaction.options.getFocused().toLowerCase();
-  const events = await loa.eventsForDay(dow);
+  const events = await loa.eventsForDay(interaction.guildHall, dow);
   const choices = events
     .filter((e) => e.name.toLowerCase().includes(focused))
     .slice(0, 25)
@@ -558,8 +589,8 @@ async function autocompleteLoaRecurring(interaction) {
 async function autocompleteLoaCancel(interaction) {
   if (!loa) return interaction.respond([]).catch(() => {});
   const admin = isAdminMember(interaction);
-  const entries = admin ? await loa.all(true) : await loa.mine(interaction.user.id);
-  const today = createLoa.todayInGuildTz();
+  const entries = admin ? await loa.all(interaction.guildHall, true) : await loa.mine(interaction.guildHall, interaction.user.id);
+  const today = createLoa.todayInGuildTz(interaction.guildHall);
   const upcoming = entries.filter((e) => {
     if (e.type === 'event') return e.event_date >= today;
     if (e.type === 'range') return e.end_date >= today;
@@ -589,7 +620,7 @@ async function handleAttendance(interaction) {
   if (!isAdminMember(interaction)) return interaction.editReply('Officers only.');
 
   const eventScheduleId = interaction.options.getString('event');
-  const ev = await attendance.getScheduleEvent(eventScheduleId);
+  const ev = await attendance.getScheduleEvent(interaction.guildHall, eventScheduleId);
   if (!ev) return interaction.editReply('Unknown event — pick one from the list.');
 
   const channelOpt = interaction.options.getChannel('channel');
@@ -597,17 +628,17 @@ async function handleAttendance(interaction) {
   if (!channel) return interaction.editReply("You're not in a voice channel — specify one with the channel option.");
 
   const dateInput = interaction.options.getString('date');
-  const eventDate = dateInput || createLoa.todayInGuildTz();
+  const eventDate = dateInput || createLoa.todayInGuildTz(interaction.guildHall);
   if (!loa.isValidDate(eventDate)) return interaction.editReply('Date must be in YYYY-MM-DD format.');
 
   const members = getVoiceMembers(channel.id);
   if (members.length === 0) return interaction.editReply('No one is in that voice channel right now.');
 
-  const ids = await identities.load();
+  const ids = await identities.load(interaction.guildHall.id);
   members.forEach((m) => { m.name = ids.displayNameFor(m.id, m.name); });
 
   try {
-    await attendance.createEvent({ title: ev.name, eventDate, eventScheduleId, attendees: members });
+    await attendance.createEvent(interaction.guildHall, { title: ev.name, eventDate, eventScheduleId, attendees: members });
   } catch (err) {
     return interaction.editReply(err.message || 'Something went wrong saving that attendance.');
   }
@@ -631,7 +662,7 @@ async function handleAnnounce(interaction) {
   const timeInput = interaction.options.getString('time');
   const message = interaction.options.getString('message') || 'Get into CTA Comms — {time}';
 
-  const when = parseAnnounceTime(timeInput);
+  const when = parseAnnounceTime(timeInput, interaction.guildHall.timezone);
   if (!when) return interaction.editReply(`Couldn't understand "${timeInput}" as a time. Try something like \`9:30pm\` or \`2130\`.`);
 
   const guild = getGuild();
