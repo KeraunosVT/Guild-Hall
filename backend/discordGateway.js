@@ -66,6 +66,17 @@ let attendance = null;
 // the modules above are built once at boot and no longer carry a guild.
 let db = null;
 
+// Wire the data modules. Separated from connecting to Discord so the
+// interaction path can be exercised without a gateway connection — see the test
+// seam at the bottom of this file.
+function wireModules(supabase) {
+  db = supabase;
+  eliteTimers = supabase ? createEliteTimers(supabase) : null;
+  loa = supabase ? createLoa(supabase) : null;
+  identities = supabase ? createIdentities(supabase) : null;
+  attendance = supabase ? createAttendance(supabase) : null;
+}
+
 function start(supabase) {
   db = supabase;
   // The token alone is enough now: which servers the bot serves comes from the
@@ -75,10 +86,7 @@ function start(supabase) {
     return;
   }
 
-  eliteTimers = supabase ? createEliteTimers(supabase) : null;
-  loa = supabase ? createLoa(supabase) : null;
-  identities = supabase ? createIdentities(supabase) : null;
-  attendance = supabase ? createAttendance(supabase) : null;
+  wireModules(supabase);
 
   client = new Client({
     intents: [
@@ -454,7 +462,7 @@ async function handleLoaEvent(interaction) {
       ? `Recorded ✅ — LOA submitted for **${target.displayName}** on ${date}${timeRange}${scope}.`
       : `Recorded ✅ — LOA submitted for ${date}${timeRange}${scope}.`);
     const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is on LOA${scope} — ${discordDate(date)}${timeRange}`);
-    if (messageId) await loa.setMessageId(id, messageId);
+    if (messageId) await loa.setMessageId(interaction.guildHall, id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
   }
@@ -481,7 +489,7 @@ async function handleLoaRange(interaction) {
       ? `Recorded ✅ — LOA submitted for **${target.displayName}**, ${startDate} to ${endDate}.`
       : `Recorded ✅ — LOA submitted for ${startDate} to ${endDate}.`);
     const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is on LOA — ${discordDate(startDate)} to ${discordDate(endDate)}`);
-    if (messageId) await loa.setMessageId(id, messageId);
+    if (messageId) await loa.setMessageId(interaction.guildHall, id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
   }
@@ -525,7 +533,7 @@ async function handleLoaRecurring(interaction) {
       ? `Recorded ✅ — **${target.displayName}** is now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`
       : `Recorded ✅ — you're now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`);
     const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is always on LOA every **${DAY_NAMES[dow]}**${timeRange}${scope}`);
-    if (messageId) await loa.setMessageId(id, messageId);
+    if (messageId) await loa.setMessageId(interaction.guildHall, id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
   }
@@ -764,3 +772,24 @@ function getVoiceMembers(guildHall, channelId) {
 }
 
 module.exports = { start, listVoiceChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance };
+
+// ── Test seam ───────────────────────────────────────────────────────────────
+// The interaction path is the highest-risk code in this project (plan task 12):
+// a missed tenant resolution doesn't error, it writes one guild's data into
+// another's. It therefore has to be testable, and it can't be reached through
+// start() because that opens a real gateway connection and needs a bot token.
+//
+// This exposes the handler and lets a test inject a fake client, so the whole
+// path — tenant resolution, per-guild config, officer checks, channel targeting
+// — runs against the real database with no Discord traffic. Nothing in the
+// application calls these.
+module.exports.__test = {
+  wire(supabase, fakeClient) {
+    wireModules(supabase);
+    client = fakeClient;
+    ready = true;
+  },
+  handleInteraction,
+  isAdminMember,
+  getGuild,
+};

@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/run.js",
+    "test:audit": "node test/leakAudit.js",
+    "test:isolation": "node test/apiIsolation.js",
+    "test:bot": "node test/botIsolation.js"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

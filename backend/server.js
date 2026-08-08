@@ -594,7 +594,12 @@ app.get('/api/players', async (req, res) => {
   try {
     const lastN = Math.min(Math.max(parseInt(req.query.last, 10) || 0, 0), 500);
 
-    const cacheKey = `last:${lastN}`;
+    // The guild MUST be in the key. Every query below is scoped, but this cache
+    // sits in front of them: keyed on lastN alone, the first guild to load the
+    // roster fills the entry and every other guild is served its player list
+    // for the rest of the TTL. Scoped queries behind an unscoped cache are not
+    // scoped at all.
+    const cacheKey = `${req.guildId}:last:${lastN}`;
     const hit = playersCache.get(cacheKey);
     if (hit && Date.now() - hit.at < PLAYERS_CACHE_TTL_MS) {
       return res.json({ players: hit.players });
@@ -680,10 +685,12 @@ app.get('/api/players', async (req, res) => {
 // could have. "Could have" counts only events from their first recorded
 // attendance onward — measuring a new member against events that happened
 // before they joined would show a rate that says nothing about them.
-async function playerAttendance(discordId) {
+// Takes the guild-scoped client: this lives at module level, so there is no
+// request in scope to derive one from.
+async function playerAttendance(db, discordId) {
   const [{ data: mine }, { data: allEvents }] = await Promise.all([
-    dbFor(req).from('event_attendance').select('event_id').eq('discord_id', discordId),
-    dbFor(req).from('events').select('id, title, event_date').order('event_date', { ascending: false }),
+    db.from('event_attendance').select('event_id').eq('discord_id', discordId),
+    db.from('events').select('id, title, event_date').order('event_date', { ascending: false }),
   ]);
   const attendedIds = new Set((mine || []).map((a) => a.event_id));
   const events = allEvents || [];
@@ -714,23 +721,24 @@ async function playerAttendance(discordId) {
 // unconditionally; on someone else's it takes the capability that governs that
 // ledger, since who-got-what is otherwise officer-only (see the loot tally).
 // The two halves are gated separately — currency is the more sensitive one.
-async function playerLoot(discordId, viewer) {
+// Takes the guild-scoped client, same reason as playerAttendance above.
+async function playerLoot(db, discordId, viewer) {
   const isSelf = viewer?.id === discordId;
   const canItems = isSelf || userHas(viewer, 'loot.awards');
   const canCurrency = isSelf || userHas(viewer, 'loot.currency');
 
   const [awards, currency, catalogItems] = await Promise.all([
     canItems
-      ? dbFor(req).from('loot_awards').select('id, item_key, priority, awarded_at')
+      ? db.from('loot_awards').select('id, item_key, priority, awarded_at')
         .eq('discord_id', discordId).order('awarded_at', { ascending: false }).then((r) => r.data || [])
       : Promise.resolve(null),
     canCurrency
-      ? dbFor(req).from('currency_awards').select('id, currency, amount, reason, awarded_at')
+      ? db.from('currency_awards').select('id, currency, amount, reason, awarded_at')
         .eq('discord_id', discordId).order('awarded_at', { ascending: false }).then((r) => r.data || [])
       : Promise.resolve(null),
     // Names resolved here rather than making the profile page fetch the whole
     // catalog just to label a handful of rows.
-    canItems ? dbFor(req).from('loot_items').select('key, name, grade, image_url').then((r) => r.data || []) : Promise.resolve([]),
+    canItems ? db.from('loot_items').select('key, name, grade, image_url').then((r) => r.data || []) : Promise.resolve([]),
   ]);
 
   const byKey = Object.fromEntries((catalogItems || []).map((i) => [i.key, i]));
@@ -822,7 +830,7 @@ app.get('/api/player/:name', async (req, res) => {
     // Both hang off the Discord id, so an unmapped player has neither — a name
     // on a scoreboard with nobody linked to it can't be tied to a member.
     const [attendance, loot] = discordId
-      ? await Promise.all([playerAttendance(discordId), playerLoot(discordId, req.user)])
+      ? await Promise.all([playerAttendance(dbFor(req), discordId), playerLoot(dbFor(req), discordId, req.user)])
       : [null, null];
 
     res.json({
@@ -857,7 +865,7 @@ app.get('/api/stats/summary', async (req, res) => {
 
   try {
     // Total Matches
-    const { count: totalMatches } = await supabase
+    const { count: totalMatches } = await dbFor(req)
       .from('wargame_matches')
       .select('*', { count: 'exact', head: true });
 
@@ -915,7 +923,7 @@ app.get('/api/matches/recent', async (req, res) => {
     // Clamp the limit so a caller can't request, say, ?limit=100000
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 6, 1), 500);
 
-    const { data: matches, error } = await supabase
+    const { data: matches, error } = await dbFor(req)
       .from('wargame_matches')
       .select('*')
       .order('match_date', { ascending: false })
@@ -926,7 +934,10 @@ app.get('/api/matches/recent', async (req, res) => {
 
     // Single query for every player row across all matches (no N+1)
     const matchIds = matches.map(m => m.id);
-    const { data: allPlayers, error: pError } = await supabase
+    // Scoped as well as filtered by match id: the ids come from this guild's
+    // own matches above, but a stray id would otherwise pull another tenant's
+    // player rows straight through.
+    const { data: allPlayers, error: pError } = await dbFor(req)
       .from('player_match_stats')
       .select('match_id, guild_name, team_color, kills, damage_dealt, healing')
       .in('match_id', matchIds);
@@ -999,17 +1010,19 @@ app.get('/api/match/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get match info
-    const { data: match, error: matchError } = await supabase
+    // Scoped: the id alone is a uuid anyone can hold, so without the guild
+    // filter this route hands any logged-in member any guild's war record.
+    const { data: match, error: matchError } = await dbFor(req)
       .from('wargame_matches')
       .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (matchError) throw matchError;
+    if (!match) return res.status(404).json({ error: 'Match not found.' });
 
     // Get players
-    const { data: players, error: playersError } = await supabase
+    const { data: players, error: playersError } = await dbFor(req)
       .from('player_match_stats')
       .select('*')
       .eq('match_id', id)
