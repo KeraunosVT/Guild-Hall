@@ -32,7 +32,12 @@ const guildRegistry = require('./guildRegistry');
 // is honoured too, for links that carry their own context.
 const GUILD_HEADER = 'x-guild-id';
 
-module.exports = function createGuildContext(supabase) {
+// applyGuildAccess is injected rather than required: auth.js already imports
+// GUILD_HEADER from this module, so importing auth here would close a require
+// cycle and whichever module loaded second would destructure `undefined` off a
+// half-built exports object — a session that silently never gets narrowed.
+// Passing it in keeps the dependency one-way and this module testable alone.
+module.exports = function createGuildContext(supabase, applyGuildAccess = () => null) {
   // Attach a resolved tenant, or fail closed. Returns true on success so the
   // callers below can stop cleanly.
   async function attach(req, res, guildId) {
@@ -67,6 +72,10 @@ module.exports = function createGuildContext(supabase) {
     if (!membership) return res.status(403).json({ error: 'Not a member of that guild.' });
 
     if (!(await attach(req, res, requested))) return;
+    // Narrow the session to THIS guild's capabilities. Until this runs, the
+    // session holds a list of memberships and no flat permissions array, so
+    // every userHas() downstream is answering for the guild in front of it.
+    applyGuildAccess(req.user, requested);
     req.guildRoles = membership.roles;   // per-guild roles for permission checks
     return next();
   }
@@ -80,6 +89,10 @@ module.exports = function createGuildContext(supabase) {
   async function resolveGuildOrSingle(req, res, next) {
     if (process.env.SINGLE_GUILD_ID) {
       if (!(await attach(req, res, process.env.SINGLE_GUILD_ID))) return;
+      // Narrow to the pinned guild. A session from before task 10 has no guilds
+      // list and is left exactly as it was, which is what stops a deploy from
+      // stripping every live session's access mid-request.
+      applyGuildAccess(req.user, process.env.SINGLE_GUILD_ID);
       return next();
     }
     return resolveGuild(req, res, next);

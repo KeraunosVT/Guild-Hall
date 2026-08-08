@@ -80,6 +80,38 @@ async function resolveById(supabase, guildId) {
   return row;
 }
 
+// Which of these Discord servers do we host? Login asks this with the user's
+// whole Discord server list, which for an active account can be a hundred ids —
+// so it is one `in` query, not a hundred cached point lookups. A cold cache
+// with resolveByDiscordId in a loop would put 100 round-trips on the login path.
+//
+// Only hosted, active guilds come back, so the caller never learns anything
+// about servers we don't host — it just gets a shorter list than it sent.
+async function resolveManyByDiscordIds(supabase, discordGuildIds) {
+  if (!supabase || !Array.isArray(discordGuildIds) || !discordGuildIds.length) return [];
+
+  const ids = [...new Set(discordGuildIds.map(String))];
+  const { data, error } = await supabase
+    .from('guilds').select(COLUMNS).in('discord_guild_id', ids).eq('status', 'active');
+
+  if (error) {
+    // No stale fallback here: this decides which guilds a session may touch, and
+    // a half-remembered answer is worse than making the user sign in again.
+    console.error('guildRegistry bulk lookup failed:', error.message);
+    return [];
+  }
+
+  const rows = data || [];
+  // Warm the point-lookup cache too — resolveById runs on every request that
+  // follows, and login has just paid for these rows.
+  const at = Date.now();
+  rows.forEach((row) => {
+    cache.set(String(row.discord_guild_id), { row, at });
+    byId.set(row.id, { row, at });
+  });
+  return rows;
+}
+
 // Call after a guilds row is created, edited, or suspended. Clears both indexes
 // since one row lives in each.
 function invalidate(discordGuildId) {
@@ -88,4 +120,4 @@ function invalidate(discordGuildId) {
   byId.clear();
 }
 
-module.exports = { resolveByDiscordId, resolveById, invalidate };
+module.exports = { resolveByDiscordId, resolveById, resolveManyByDiscordIds, invalidate };

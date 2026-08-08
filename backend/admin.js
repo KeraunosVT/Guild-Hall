@@ -1388,7 +1388,8 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       // granting a capability to a role id would collide with another's.
     }, { onConflict: 'guild_id,subject_type,subject_id,permission' });
     if (error) return res.status(500).json({ error: 'Failed to grant permission.' });
-    perms.invalidate();
+    // Only this guild's cached grants — see permissions.js invalidate().
+    perms.invalidate(req.guildId);
     res.json({ ok: true });
   });
 
@@ -1399,7 +1400,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const { error } = await dbFor(req).from('permission_grants').delete()
       .eq('subject_type', subject_type).eq('subject_id', String(subject_id)).eq('permission', permission);
     if (error) return res.status(500).json({ error: 'Failed to revoke permission.' });
-    perms.invalidate();
+    perms.invalidate(req.guildId);
     res.json({ ok: true });
   });
 

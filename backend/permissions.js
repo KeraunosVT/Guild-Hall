@@ -10,6 +10,7 @@
 // threading a client through it would mean changing its export shape and every
 // import for no behavioural gain.
 const { createClient } = require('@supabase/supabase-js');
+const { tenantDb } = require('./tenantDb');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -93,29 +94,44 @@ function permissionForPath(path) {
 // Grants change rarely and are read on every login and hourly re-verify, so a
 // short cache keeps that off the database without making revocation feel stale
 // — the session itself already caches permissions for far longer.
+//
+// Keyed by guild. A single shared cache here would have been the worst kind of
+// leak: not merely showing one guild another's data, but handing one guild's
+// members the capabilities another guild granted, since resolveFor() matches
+// grants by Discord role id and those ids are unique per Discord server but the
+// grant rows were not separated at all.
 const CACHE_TTL_MS = 60 * 1000;
-let cache = null;
-let cachedAt = 0;
+const perGuild = new Map(); // guildId -> { rows, at }
 
-async function loadGrants() {
-  if (!supabase) return [];
-  if (cache && Date.now() - cachedAt < CACHE_TTL_MS) return cache;
-  const { data, error } = await supabase.from('permission_grants')
+async function loadGrants(guildId) {
+  // No guild means no grants. Returning [] rather than throwing keeps the
+  // caller's failure mode "this member has no capabilities" — which fails
+  // closed — instead of a 500 on a path as load-bearing as login.
+  if (!supabase || !guildId) return [];
+
+  const hit = perGuild.get(guildId);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
+
+  const { data, error } = await tenantDb(supabase, guildId).from('permission_grants')
     .select('subject_type, subject_id, subject_label, permission');
   if (error) {
     // Serve a stale cache rather than silently dropping everyone's access; a
     // fresh boot with a broken database grants nothing, which fails closed.
     console.error('permission_grants load failed:', error.message);
-    return cache || [];
+    return hit ? hit.rows : [];
   }
-  cache = data || [];
-  cachedAt = Date.now();
-  return cache;
+  const rows = data || [];
+  perGuild.set(guildId, { rows, at: Date.now() });
+  return rows;
 }
 
-function invalidate() {
-  cache = null;
-  cachedAt = 0;
+// Drop one guild's cached grants. Called after a grant changes, so only the
+// guild that changed pays the reload — clearing every tenant's cache because
+// one officer edited one role would be a self-inflicted thundering herd.
+// No argument clears everything, which is only for tests and shutdown.
+function invalidate(guildId) {
+  if (guildId) perGuild.delete(guildId);
+  else perGuild.clear();
 }
 
 // Does this session hold a capability? Sessions issued before capabilities
@@ -129,9 +145,11 @@ function userHas(user, permission) {
 }
 
 // Everything granted to any of this member's Discord roles, plus anything
-// granted to them personally.
-async function resolveFor({ roleIds = [], userId = null }) {
-  const grants = await loadGrants();
+// granted to them personally — WITHIN ONE GUILD. Capabilities are per-guild:
+// the same person can run loot council in one house and be a plain member in
+// another, so this is always answered for a specific guildId and never merged.
+async function resolveFor({ guildId = null, roleIds = [], userId = null }) {
+  const grants = await loadGrants(guildId);
   const roles = new Set(roleIds.map(String));
   const out = new Set();
   grants.forEach((g) => {

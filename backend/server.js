@@ -13,6 +13,7 @@ const multer = require('multer');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const {
   router: authRouter, requireAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
+  applyGuildAccess,
 } = require('./auth');
 const { listMembers } = require('./discord');
 const createGuildContext = require('./guildContext');
@@ -114,7 +115,10 @@ const loa = supabase ? createLoa(supabase) : null;
 const auditLog = supabase ? createAuditLog(supabase) : null;
 // Guild resolution needs the client to read the tenant registry, so it's built
 // here alongside the other factories rather than imported as a bare middleware.
-const { resolveGuildOrSingle } = createGuildContext(supabase);
+// applyGuildAccess is passed in, not imported by guildContext: auth.js already
+// imports GUILD_HEADER from it, and requiring back the other way would be a
+// cycle. See the note on createGuildContext.
+const { resolveGuildOrSingle } = createGuildContext(supabase, applyGuildAccess);
 
 // The gateway needs Supabase for /elitetimer persistence, so start it after setup.
 gateway.start(supabase);

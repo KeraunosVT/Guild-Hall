@@ -87,9 +87,21 @@ async function fetchAllMembers() {
 
 // Fetch one guild member by user id (for session re-verification).
 // Returns { status, member } — 404 means they're no longer in the guild.
-async function fetchMember(userId) {
-  if (!botConfigured) throw new Error('Discord bot is not configured.');
-  const res = await axios.get(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
+//
+// Takes the Discord server id because re-verification is per-guild now: a
+// session can hold membership in several guilds, and each has to be re-checked
+// against the server it belongs to. Defaults to the env guild so single-tenant
+// callers are unchanged.
+//
+// NOTE: the rest of this module (listMembers, listRoles, postEmbed, postImage)
+// is still bound to the env GUILD_ID and channel ids, with module-level caches
+// that assume one guild. That is plan tasks 8 and 9 for the bot REST layer and
+// is deliberately not done here — this function is the only part session
+// re-verification needs.
+async function fetchMember(userId, discordGuildId = GUILD_ID) {
+  if (!BOT_TOKEN) throw new Error('Discord bot is not configured.');
+  if (!discordGuildId) throw new Error('fetchMember: no guild id.');
+  const res = await axios.get(`${API}/guilds/${discordGuildId}/members/${userId}`, {
     headers: authHeaders(),
     validateStatus: (s) => s < 500,
   });
