@@ -16,6 +16,7 @@ const {
 } = require('./auth');
 const { listMembers } = require('./discord');
 const createGuildContext = require('./guildContext');
+const { tenantDb } = require('./tenantDb');
 const SHARDS = require('../shared/shards.json');
 const BOSS_WEAPONS = require('../shared/archbossWeapons.json');
 const BUILDS = ['PvP', 'PvE'];
@@ -130,10 +131,29 @@ gateway.start(supabase);
 // Renaming is ADDITIVE: a scoreboard records whatever the guild was called the
 // day it was uploaded, so every past name has to stay listed forever. And note
 // "Highly Regarded" is a *different* guild — it must not be added.
-const GUILD_IDENTITY = require('../shared/guild.json');
-const MY_GUILD = GUILD_IDENTITY.tag;
-const GUILD_ALIASES = Object.fromEntries(GUILD_IDENTITY.aliases.map((n) => [n, MY_GUILD]));
-const canonicalGuild = (name) => GUILD_ALIASES[(name || '').trim()] || (name || '').trim() || 'Unknown';
+// These used to be module-level constants read from shared/guild.json at boot,
+// which pinned the whole process to one guild's tag and alias list. They are now
+// derived per request from req.guild (the guilds row), so guild.json is only the
+// template a new tenant is seeded from — plan task 9.
+//
+// aliasesOf falls back to [tag] rather than [] on an empty alias list: an empty
+// array passed to .in('guild_name', []) matches NOTHING, which would silently
+// show a brand-new guild an empty war record instead of its own matches.
+const aliasesOf = (guild) => {
+  const list = Array.isArray(guild && guild.aliases) ? guild.aliases.filter(Boolean) : [];
+  return list.length ? list : [guild && guild.tag].filter(Boolean);
+};
+
+// Collapse any of this guild's past names onto its current tag; anything else is
+// an enemy guild and passes through unchanged.
+const canonicalGuildFor = (guild, name) => {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return 'Unknown';
+  return aliasesOf(guild).includes(trimmed) ? guild.tag : trimmed;
+};
+
+// Shorthand for the scoped client inside a route handler.
+const dbFor = (req) => tenantDb(supabase, req.guildId);
 
 // Health check (public)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -237,7 +257,7 @@ app.use('/api/admin', requireAdminArea, auditLog ? auditLog.log : (req, res, nex
 // ── MEMBERS AREA: Class builds ───────────────────────────────────────────────
 app.get('/api/my-classes', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-  const { data } = await supabase.from('member_roles').select('pvp_classes, pve_classes').eq('discord_id', req.user.id).single();
+  const { data } = await dbFor(req).from('member_roles').select('pvp_classes, pve_classes').eq('discord_id', req.user.id).single();
   res.json({
     pvp_classes: Array.isArray(data?.pvp_classes) ? data.pvp_classes : [],
     pve_classes: Array.isArray(data?.pve_classes) ? data.pve_classes : [],
@@ -248,13 +268,16 @@ app.put('/api/my-classes', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
   const { pvp_classes, pve_classes } = req.body || {};
   const clean = (arr) => (Array.isArray(arr) ? arr.filter(Boolean).slice(0, 3) : []);
-  const { error } = await supabase.from('member_roles')
+  const { error } = await dbFor(req).from('member_roles')
     .upsert({
       discord_id: req.user.id,
       pvp_classes: clean(pvp_classes),
       pve_classes: clean(pve_classes),
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'discord_id', ignoreDuplicates: false });
+      // Composite target: Phase 1 widened member_roles' PK from discord_id to
+      // (guild_id, discord_id), so 'discord_id' alone matches no constraint and
+      // Postgres rejects the upsert outright.
+    }, { onConflict: 'guild_id,discord_id', ignoreDuplicates: false });
   if (error) return res.status(500).json({ error: 'Failed to save classes.' });
   res.json({ ok: true });
 });
@@ -278,10 +301,10 @@ app.get('/api/my-profile', async (req, res) => {
     const names = identity
       ? [identity.display_name, ...(Array.isArray(identity.ingame_names) ? identity.ingame_names : [])].filter(Boolean)
       : [name];
-    const { count } = await supabase.from('player_match_stats')
+    const { count } = await dbFor(req).from('player_match_stats')
       .select('*', { count: 'exact', head: true })
       .in('player_name', names)
-      .in('guild_name', Object.keys(GUILD_ALIASES));
+      .in('guild_name', aliasesOf(req.guild));
 
     res.json({ name, mapped: true, hasRecord: (count || 0) > 0 });
   } catch (err) {
@@ -326,8 +349,8 @@ app.get('/api/members', async (req, res) => {
     const roles = {};
     if (supabase) {
       const [{ data: shardData }, { data: roleData }] = await Promise.all([
-        supabase.from('shard_counts').select('discord_id, shards'),
-        supabase.from('member_roles').select('discord_id, pvp_role'),
+        dbFor(req).from('shard_counts').select('discord_id, shards'),
+        dbFor(req).from('member_roles').select('discord_id, pvp_role'),
       ]);
       (shardData || []).forEach((r) => { counts[r.discord_id] = r.shards || {}; });
       (roleData || []).forEach((r) => { roles[r.discord_id] = r.pvp_role || ''; });
@@ -357,7 +380,7 @@ app.put('/api/shards/:discordId', async (req, res) => {
     .map((w) => ({ boss: w.boss, weapon: w.weapon, build: BUILDS.includes(w.build) ? w.build : '' }))
     .slice(0, 50);
   const display_name = (req.body?.display_name || req.user.username || '').slice(0, 120);
-  const { error } = await supabase.from('shard_counts')
+  const { error } = await dbFor(req).from('shard_counts')
     .upsert({ discord_id: target, display_name, shards, updated_at: new Date().toISOString() });
   if (error) { console.error('Shard save error:', error.message); return res.status(500).json({ error: 'Failed to save shards.' }); }
   res.json({ shards });
@@ -368,7 +391,7 @@ app.put('/api/shards/:discordId', async (req, res) => {
 app.get('/api/loot/catalog', async (req, res) => {
   if (!lootCatalog) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    res.json(await lootCatalog.getCatalog());
+    res.json(await lootCatalog.getCatalog(req.guildId));
   } catch (err) {
     console.error('Catalog error:', err.message);
     res.status(500).json({ error: 'Failed to load loot catalog.' });
@@ -380,9 +403,9 @@ app.get('/api/loot/catalog', async (req, res) => {
 app.get('/api/loot', async (req, res) => {
   if (!supabase || !lootCatalog) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    const validKeys = await lootCatalog.getKeys();
+    const validKeys = await lootCatalog.getKeys(req.guildId);
     const [{ data, error }, ids] = await Promise.all([
-      supabase.from('loot_wishlists').select('discord_id, display_name, picks'),
+      dbFor(req).from('loot_wishlists').select('discord_id, display_name, picks'),
       identities.load(req.guildId),
     ]);
     if (error) throw error;
@@ -406,7 +429,7 @@ app.get('/api/loot', async (req, res) => {
     // Builds of each item already awarded to the current member, so the UI can
     // lock just that build's chip and leave the others open to request. Awards
     // with no recorded build (made before builds were tracked) don't lock anything.
-    const { data: myAwards } = await supabase.from('loot_awards').select('item_key, priority').eq('discord_id', req.user.id);
+    const { data: myAwards } = await dbFor(req).from('loot_awards').select('item_key, priority').eq('discord_id', req.user.id);
     const awardedBuilds = {};
     (myAwards || []).forEach((a) => {
       if (!a.priority) return;
@@ -425,8 +448,8 @@ app.put('/api/loot/:discordId', async (req, res) => {
     return res.status(403).json({ error: 'You can only edit your own wishlist.' });
   }
   if (!supabase || !lootCatalog) return res.status(503).json({ error: 'Database not configured.' });
-  const validKeys = await lootCatalog.getKeys();
-  const { data: existing } = await supabase.from('loot_wishlists').select('picks').eq('discord_id', target).single();
+  const validKeys = await lootCatalog.getKeys(req.guildId);
+  const { data: existing } = await dbFor(req).from('loot_wishlists').select('picks').eq('discord_id', target).single();
   const existingPicks = existing?.picks || {};
   const now = new Date().toISOString();
   const incoming = req.body?.picks || {};
@@ -439,7 +462,7 @@ app.put('/api/loot/:discordId', async (req, res) => {
     picks[k] = { priority: prio, added_at: addedAt };
   });
   const display_name = (req.body?.display_name || req.user.username || '').slice(0, 120);
-  const { error } = await supabase.from('loot_wishlists')
+  const { error } = await dbFor(req).from('loot_wishlists')
     .upsert({ discord_id: target, display_name, picks, updated_at: new Date().toISOString() });
   if (error) { console.error('Loot save error:', error.message); return res.status(500).json({ error: 'Failed to save wishlist.' }); }
   res.json({ picks: Object.fromEntries(Object.entries(picks).map(([k, v]) => [k, v.priority])) });
@@ -449,7 +472,7 @@ app.put('/api/loot/:discordId', async (req, res) => {
 // Event schedule (read-only for members; admin manages via admin router).
 app.get('/api/event-schedule', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-  const { data, error } = await supabase.from('event_schedule').select('*').order('day_of_week').order('name');
+  const { data, error } = await dbFor(req).from('event_schedule').select('*').order('day_of_week').order('name');
   if (error) return res.status(500).json({ error: 'Failed to load schedule.' });
   res.json({ schedule: data || [] });
 });
@@ -457,7 +480,7 @@ app.get('/api/event-schedule', async (req, res) => {
 // ── Wargame maps (read-only for members; admin manages via admin router) ────
 app.get('/api/maps', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-  const { data, error } = await supabase.from('wargame_maps').select('*').order('name');
+  const { data, error } = await dbFor(req).from('wargame_maps').select('*').order('name');
   if (error) return res.status(500).json({ error: 'Failed to load maps.' });
   res.json({ maps: data || [] });
 });
@@ -472,7 +495,7 @@ app.get('/api/elite-timers', async (req, res) => {
 // Per-map win/loss record, for the War Record page.
 app.get('/api/maps/stats', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-  const { data, error } = await supabase.from('wargame_matches').select('map, result').not('map', 'is', null);
+  const { data, error } = await dbFor(req).from('wargame_matches').select('map, result').not('map', 'is', null);
   if (error) return res.status(500).json({ error: 'Failed to load map stats.' });
 
   const byMap = {};
@@ -578,14 +601,14 @@ app.get('/api/players', async (req, res) => {
     let data;
     let matchIds = null; // null = all-time (no match scoping), set below for the "last N" branch
     if (lastN > 0) {
-      const { data: recentMatches } = await supabase
+      const { data: recentMatches } = await dbFor(req)
         .from('wargame_matches').select('id')
         .order('match_date', { ascending: false }).limit(lastN);
       matchIds = (recentMatches || []).map((m) => m.id);
       if (matchIds.length === 0) return res.json({ players: [] });
 
-      const guildNames = Object.keys(GUILD_ALIASES);
-      const { data: rows, error: rErr } = await supabase
+      const guildNames = aliasesOf(req.guild);
+      const { data: rows, error: rErr } = await dbFor(req)
         .from('player_match_stats')
         .select('player_name, kills, assists, damage_dealt, damage_taken, healing')
         .in('match_id', matchIds)
@@ -607,7 +630,7 @@ app.get('/api/players', async (req, res) => {
     } else {
       // Guild scoping is passed in rather than living inside the SQL function,
       // so the same function definition works for any guild's deployment.
-      const result = await supabase.rpc('get_player_stats', { p_guild_names: Object.keys(GUILD_ALIASES) });
+      const result = await dbFor(req).rpc('get_player_stats', { p_guild_names: aliasesOf(req.guild) });
       if (result.error) throw result.error;
       data = result.data;
     }
@@ -617,8 +640,8 @@ app.get('/api/players', async (req, res) => {
     // RPC output, so this is a separate fetch, scoped to the same match set as
     // the stats above. Paginated via .range() since player_match_stats can
     // exceed PostgREST's 1,000-row default cap for a guild with real history.
-    const guildNames = Object.keys(GUILD_ALIASES);
-    const weaponRows = await fetchAllRows(supabase, 'player_match_stats', 'player_name, weapon_1, weapon_2', guildNames, matchIds);
+    const guildNames = aliasesOf(req.guild);
+    const weaponRows = await fetchAllRows(dbFor(req), 'player_match_stats', 'player_name, weapon_1, weapon_2', guildNames, matchIds);
     const classCounts = {}; // resolved player_name -> { className: count }
     weaponRows.forEach((r) => {
       const resolved = ids.resolveName(r.player_name);
@@ -655,8 +678,8 @@ app.get('/api/players', async (req, res) => {
 // before they joined would show a rate that says nothing about them.
 async function playerAttendance(discordId) {
   const [{ data: mine }, { data: allEvents }] = await Promise.all([
-    supabase.from('event_attendance').select('event_id').eq('discord_id', discordId),
-    supabase.from('events').select('id, title, event_date').order('event_date', { ascending: false }),
+    dbFor(req).from('event_attendance').select('event_id').eq('discord_id', discordId),
+    dbFor(req).from('events').select('id, title, event_date').order('event_date', { ascending: false }),
   ]);
   const attendedIds = new Set((mine || []).map((a) => a.event_id));
   const events = allEvents || [];
@@ -694,16 +717,16 @@ async function playerLoot(discordId, viewer) {
 
   const [awards, currency, catalogItems] = await Promise.all([
     canItems
-      ? supabase.from('loot_awards').select('id, item_key, priority, awarded_at')
+      ? dbFor(req).from('loot_awards').select('id, item_key, priority, awarded_at')
         .eq('discord_id', discordId).order('awarded_at', { ascending: false }).then((r) => r.data || [])
       : Promise.resolve(null),
     canCurrency
-      ? supabase.from('currency_awards').select('id, currency, amount, reason, awarded_at')
+      ? dbFor(req).from('currency_awards').select('id, currency, amount, reason, awarded_at')
         .eq('discord_id', discordId).order('awarded_at', { ascending: false }).then((r) => r.data || [])
       : Promise.resolve(null),
     // Names resolved here rather than making the profile page fetch the whole
     // catalog just to label a handful of rows.
-    canItems ? supabase.from('loot_items').select('key, name, grade, image_url').then((r) => r.data || []) : Promise.resolve([]),
+    canItems ? dbFor(req).from('loot_items').select('key, name, grade, image_url').then((r) => r.data || []) : Promise.resolve([]),
   ]);
 
   const byKey = Object.fromEntries((catalogItems || []).map((i) => [i.key, i]));
@@ -740,8 +763,8 @@ app.get('/api/player/:name', async (req, res) => {
     const gearEntry = discordId && gearIlvl ? await gearIlvl.forMember(req.guildId, discordId) : null;
 
     // Pull every match row for those names (our guild only).
-    const guildNames = Object.keys(GUILD_ALIASES);
-    const { data: rows, error: rErr } = await supabase
+    const guildNames = aliasesOf(req.guild);
+    const { data: rows, error: rErr } = await dbFor(req)
       .from('player_match_stats')
       // Explicit constraint name, not just "!inner" — player_match_stats has
       // picked up a second (oddly-named, likely stale) foreign key to
@@ -836,8 +859,8 @@ app.get('/api/stats/summary', async (req, res) => {
 
     // Aggregation via RPC — bypasses the 1,000-row PostgREST limit entirely.
     // Guild scoping is passed in so the SQL function is guild-agnostic.
-    const { data: aggData, error: aggError } = await supabase
-      .rpc('get_stats_summary', { p_guild_names: Object.keys(GUILD_ALIASES) });
+    const { data: aggData, error: aggError } = await dbFor(req)
+      .rpc('get_stats_summary', { p_guild_names: aliasesOf(req.guild) });
 
     if (aggError) throw aggError;
 
@@ -851,7 +874,7 @@ app.get('/api/stats/summary', async (req, res) => {
     try {
       const [members, { data: roleData }] = await Promise.all([
         listMembers(),
-        supabase.from('member_roles').select('pvp_role'),
+        dbFor(req).from('member_roles').select('pvp_role'),
       ]);
       activeMembers = members.length;
       (roleData || []).forEach((r) => {
@@ -922,11 +945,11 @@ app.get('/api/matches/recent', async (req, res) => {
         const color = (p.team_color || '').toLowerCase();
         const teamKey = color === 'red' ? 'Red' : color === 'yellow' ? 'Yellow' : null;
         if (!teamKey) return;
-        const g = canonicalGuild(p.guild_name);
+        const g = canonicalGuildFor(req.guild, p.guild_name);
         teamGuildCount[teamKey][g] = (teamGuildCount[teamKey][g] || 0) + 1;
       });
-      const myRedCount = teamGuildCount.Red[MY_GUILD] || 0;
-      const myYellowCount = teamGuildCount.Yellow[MY_GUILD] || 0;
+      const myRedCount = teamGuildCount.Red[req.guild.tag] || 0;
+      const myYellowCount = teamGuildCount.Yellow[req.guild.tag] || 0;
       const ourColor = myRedCount >= myYellowCount ? 'Red' : 'Yellow';
 
       // Sum kills by team color
@@ -945,7 +968,7 @@ app.get('/api/matches/recent', async (req, res) => {
       const myKills = teamKills[ourColor];
       const enemyKills = teamKills[ourColor === 'Red' ? 'Yellow' : 'Red'];
       const killDifference = Math.abs(myKills - enemyKills);
-      const winningGuild = myKills >= enemyKills ? MY_GUILD : 'Enemy';
+      const winningGuild = myKills >= enemyKills ? req.guild.tag : 'Enemy';
 
       return {
         ...match,
@@ -1022,7 +1045,7 @@ app.get('/api/match/:id', async (req, res) => {
       const color = (p.team_color || '').toLowerCase();
       const teamKey = color === 'red' ? 'Red' : color === 'yellow' ? 'Yellow' : null;
       if (!teamKey) return;
-      const g = canonicalGuild(p.guild_name);
+      const g = canonicalGuildFor(req.guild, p.guild_name);
       if (!guildTally[teamKey][g]) guildTally[teamKey][g] = { count: 0, kills: 0 };
       guildTally[teamKey][g].count += 1;
       guildTally[teamKey][g].kills += Number(p.kills || 0);
@@ -1056,12 +1079,15 @@ app.get('/api/match/:id', async (req, res) => {
 // default cap via .range() instead of trusting a single .select() to return
 // everything. `matchIds` is optional — pass null to skip that filter entirely
 // (an all-time query) rather than scoping to a specific set of matches.
-async function fetchAllRows(supabase, table, columns, guildNames, matchIds) {
+// Takes the guild-scoped client (tenantDb), not the bare one: every page of
+// this pagination has to carry the guild filter, or a large result set leaks
+// other tenants' rows from page two onward.
+async function fetchAllRows(db, table, columns, guildNames, matchIds) {
   const PAGE_SIZE = 1000;
   const all = [];
   let from = 0;
   for (;;) {
-    let q = supabase.from(table).select(columns).in('guild_name', guildNames);
+    let q = db.from(table).select(columns).in('guild_name', guildNames);
     if (matchIds) q = q.in('match_id', matchIds);
     const { data, error } = await q.range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
