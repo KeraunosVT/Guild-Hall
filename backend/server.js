@@ -348,7 +348,7 @@ app.post('/api/gear-ilvl', gearSubmitLimiter, gearUpload.single('image'), async 
 // owner (matched by Discord id) or an admin — enforced here, not just in the UI.
 app.get('/api/members', async (req, res) => {
   try {
-    const members = await listMembers();
+    const members = await listMembers(req.guild);
     const counts = {};
     const roles = {};
     if (supabase) {
@@ -572,7 +572,7 @@ app.delete('/api/loa/:id', async (req, res) => {
   try {
     const { messageId } = await loa.cancel(req.guild, req.params.id, req.user.id, userHas(req.user, 'loa.admin'));
     res.json({ ok: true });
-    gateway.deleteLoaMessage(messageId);
+    gateway.deleteLoaMessage(req.guild, messageId);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -660,7 +660,7 @@ app.get('/api/players', async (req, res) => {
       return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
     };
 
-    const members = await listMembers().catch(() => []);
+    const members = await listMembers(req.guild).catch(() => []);
     const memberIds = new Set(members.map((m) => m.id));
 
     const players = (data || []).map((p) => {
@@ -877,7 +877,7 @@ app.get('/api/stats/summary', async (req, res) => {
     let activeMembers = 0, tanks = 0, dps = 0, healers = 0;
     try {
       const [members, { data: roleData }] = await Promise.all([
-        listMembers(),
+        listMembers(req.guild),
         dbFor(req).from('member_roles').select('pvp_role'),
       ]);
       activeMembers = members.length;

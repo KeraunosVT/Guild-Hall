@@ -83,8 +83,15 @@ const REVERIFY_MS = (parseInt(process.env.SESSION_REVERIFY_MINUTES, 10) || 60) *
 
 // Auth is "configured" only when every required secret is present. If not, the
 // app fails closed — data routes return 401 and nothing leaks.
+//
+// DISCORD_GUILD_ID is deliberately NOT in this list any more. A shared
+// deployment has no single guild — it learns them from the registry — so
+// requiring it here would have left Model A with login disabled outright and a
+// boot warning blaming missing config that mode never has. Which guilds a user
+// may enter is decided per login, and resolving none of them just means they
+// aren't a member: still fails closed, but for the right reason.
 const authConfigured = Boolean(
-  DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI && DISCORD_GUILD_ID && JWT_SECRET
+  DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI && JWT_SECRET
 );
 if (!authConfigured) {
   console.warn('⚠️  Discord login is not fully configured — all data routes will be locked.');

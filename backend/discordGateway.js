@@ -10,12 +10,24 @@ const guildRegistry = require('./guildRegistry');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const GUILD_ID = process.env.DISCORD_GUILD_ID;
-const LOA_CHANNEL_ID = process.env.DISCORD_LOA_CHANNEL_ID;
-const ANNOUNCE_CHANNEL_ID = process.env.DISCORD_ANNOUNCE_CHANNEL_ID;
+// Env values are the FALLBACK for a single-guild self-host whose guilds row
+// hasn't been filled in. Each tenant's real config lives on its row, read off
+// interaction.guildHall — one bot serves many servers, so nothing here may be
+// decided once at import time (plan tasks 8 and 9).
+const ENV_GUILD_ID = process.env.DISCORD_GUILD_ID;
+const ENV_LOA_CHANNEL_ID = process.env.DISCORD_LOA_CHANNEL_ID;
+const ENV_ANNOUNCE_CHANNEL_ID = process.env.DISCORD_ANNOUNCE_CHANNEL_ID;
 // Same admin role list auth.js uses to gate the website's admin area, so
 // "officer" means the same thing in Discord as it does on the site.
-const ADMIN_ROLE_IDS = (process.env.DISCORD_ADMIN_ROLE_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const ENV_ADMIN_ROLE_IDS = (process.env.DISCORD_ADMIN_ROLE_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+// -- Per-guild config, row first then env ------------------------------------
+const loaChannelOf = (g) => (g && g.loa_channel_id) || ENV_LOA_CHANNEL_ID;
+const announceChannelOf = (g) => (g && g.announce_channel_id) || ENV_ANNOUNCE_CHANNEL_ID;
+const adminRolesOf = (g) => {
+  const list = Array.isArray(g && g.admin_role_ids) ? g.admin_role_ids.map(String).filter(Boolean) : [];
+  return list.length ? list : ENV_ADMIN_ROLE_IDS;
+};
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // "21:00" -> "9:00 PM", for echoing a recurring LOA's start time back in chat.
@@ -56,8 +68,10 @@ let db = null;
 
 function start(supabase) {
   db = supabase;
-  if (!BOT_TOKEN || !GUILD_ID) {
-    console.warn('⚠️  Discord gateway disabled — BOT_TOKEN or GUILD_ID missing.');
+  // The token alone is enough now: which servers the bot serves comes from the
+  // registry as interactions arrive, not from env.
+  if (!BOT_TOKEN) {
+    console.warn('⚠️  Discord gateway disabled — DISCORD_BOT_TOKEN missing.');
     return;
   }
 
@@ -90,9 +104,13 @@ function start(supabase) {
   });
 }
 
-function getGuild() {
+// The connected Discord server, by id. Takes the id rather than closing over
+// one: the bot is in every tenant's server, and picking the wrong cache entry
+// would post one guild's LOA or announcement into another's channel.
+function getGuild(discordGuildId) {
   if (!ready || !client) return null;
-  return client.guilds.cache.get(GUILD_ID) || null;
+  const id = String(discordGuildId || ENV_GUILD_ID || '');
+  return (id && client.guilds.cache.get(id)) || null;
 }
 
 // ── /elitetimer, /elitetimers, /loa ──────────────────────────────────────────
@@ -201,8 +219,14 @@ async function registerCommands() {
 
   try {
     const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
-    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-    console.log(`✅ Registered ${commands.length} slash command(s)`);
+    // GLOBAL, not per-guild (plan task 12). Guild-scoped registration publishes
+    // the commands to one server only, so every other tenant's members would
+    // see nothing. Global commands appear everywhere the bot is, and
+    // resolveTenant() is what decides whether a given server may use them.
+    // Trade-off: global registration can take up to an hour to propagate,
+    // where guild-scoped was instant.
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+    console.log(`✅ Registered ${commands.length} global slash command(s)`);
   } catch (err) {
     console.error('❌ Failed to register commands:', err.message);
   }
@@ -311,11 +335,15 @@ function displayNameFor(user) {
   return user.globalName || user.username || 'Member';
 }
 
+// Officer check, against THIS guild's admin roles. A role id only means
+// anything inside the server it came from, so reading one guild's list while
+// handling another's interaction would be both wrong and exploitable.
 function isAdminMember(interaction) {
-  if (!ADMIN_ROLE_IDS.length) return false;
+  const adminRoles = adminRolesOf(interaction.guildHall);
+  if (!adminRoles.length) return false;
   const roles = interaction.member?.roles?.cache;
   if (!roles) return false;
-  return ADMIN_ROLE_IDS.some((r) => roles.has(r));
+  return adminRoles.some((r) => roles.has(r));
 }
 
 // Who an LOA submission is for. Defaults to the invoker; if they passed the
@@ -344,12 +372,13 @@ function discordDate(dateStr) {
 // here (missing channel, missing permissions) shouldn't undo the LOA itself,
 // which is already recorded by the time this runs. Returns the sent message's
 // id (so the caller can remember it for later cleanup) or null if nothing sent.
-async function announceLoa(text) {
-  if (!LOA_CHANNEL_ID) return null;
-  const guild = getGuild();
-  const channel = guild?.channels.cache.get(LOA_CHANNEL_ID);
+async function announceLoa(guildHall, text) {
+  const channelId = loaChannelOf(guildHall);
+  if (!channelId) return null;
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
+  const channel = guild?.channels.cache.get(channelId);
   if (!channel?.isTextBased()) {
-    console.error(`LOA announce error: channel ${LOA_CHANNEL_ID} not found or not text-based (check DISCORD_LOA_CHANNEL_ID and bot permissions).`);
+    console.error(`LOA announce error: channel ${channelId} not found or not text-based (check this guild's loa_channel_id and bot permissions).`);
     return null;
   }
   try {
@@ -365,10 +394,11 @@ async function announceLoa(text) {
 // Best-effort: an already-deleted message (e.g. an officer removed it by hand)
 // or a missing channel/permission just gets logged, not surfaced to the caller
 // — the LOA record is already gone by the time this runs either way.
-async function deleteLoaMessage(messageId) {
-  if (!messageId || !LOA_CHANNEL_ID) return;
-  const guild = getGuild();
-  const channel = guild?.channels.cache.get(LOA_CHANNEL_ID);
+async function deleteLoaMessage(guildHall, messageId) {
+  const channelId = loaChannelOf(guildHall);
+  if (!messageId || !channelId) return;
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
+  const channel = guild?.channels.cache.get(channelId);
   if (!channel?.isTextBased()) return;
   try {
     await channel.messages.delete(messageId);
@@ -423,7 +453,7 @@ async function handleLoaEvent(interaction) {
     await interaction.editReply(target.onBehalf
       ? `Recorded ✅ — LOA submitted for **${target.displayName}** on ${date}${timeRange}${scope}.`
       : `Recorded ✅ — LOA submitted for ${date}${timeRange}${scope}.`);
-    const messageId = await announceLoa(`📋 **${target.displayName}** is on LOA${scope} — ${discordDate(date)}${timeRange}`);
+    const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is on LOA${scope} — ${discordDate(date)}${timeRange}`);
     if (messageId) await loa.setMessageId(id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
@@ -450,7 +480,7 @@ async function handleLoaRange(interaction) {
     await interaction.editReply(target.onBehalf
       ? `Recorded ✅ — LOA submitted for **${target.displayName}**, ${startDate} to ${endDate}.`
       : `Recorded ✅ — LOA submitted for ${startDate} to ${endDate}.`);
-    const messageId = await announceLoa(`📋 **${target.displayName}** is on LOA — ${discordDate(startDate)} to ${discordDate(endDate)}`);
+    const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is on LOA — ${discordDate(startDate)} to ${discordDate(endDate)}`);
     if (messageId) await loa.setMessageId(id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
@@ -494,7 +524,7 @@ async function handleLoaRecurring(interaction) {
     await interaction.editReply(target.onBehalf
       ? `Recorded ✅ — **${target.displayName}** is now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`
       : `Recorded ✅ — you're now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`);
-    const messageId = await announceLoa(`📋 **${target.displayName}** is always on LOA every **${DAY_NAMES[dow]}**${timeRange}${scope}`);
+    const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is always on LOA every **${DAY_NAMES[dow]}**${timeRange}${scope}`);
     if (messageId) await loa.setMessageId(id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
@@ -514,7 +544,7 @@ async function handleLoaCancel(interaction) {
     // everyone else can only cancel their own, enforced in loa.cancel().
     const { messageId } = await loa.cancel(interaction.guildHall, id, interaction.user.id, isAdminMember(interaction));
     await interaction.editReply('Cancelled ✅');
-    await deleteLoaMessage(messageId);
+    await deleteLoaMessage(interaction.guildHall, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong cancelling that LOA.');
   }
@@ -631,7 +661,7 @@ async function handleAttendance(interaction) {
   const eventDate = dateInput || createLoa.todayInGuildTz(interaction.guildHall);
   if (!loa.isValidDate(eventDate)) return interaction.editReply('Date must be in YYYY-MM-DD format.');
 
-  const members = getVoiceMembers(channel.id);
+  const members = getVoiceMembers(interaction.guildHall, channel.id);
   if (members.length === 0) return interaction.editReply('No one is in that voice channel right now.');
 
   const ids = await identities.load(interaction.guildHall.id);
@@ -657,7 +687,8 @@ async function handleAttendance(interaction) {
 async function handleAnnounce(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   if (!isAdminMember(interaction)) return interaction.editReply('Officers only.');
-  if (!ANNOUNCE_CHANNEL_ID) return interaction.editReply('Announcements are not configured — set DISCORD_ANNOUNCE_CHANNEL_ID.');
+  const announceChannelId = announceChannelOf(interaction.guildHall);
+  if (!announceChannelId) return interaction.editReply('Announcements are not configured for this server yet.');
 
   const timeInput = interaction.options.getString('time');
   const message = interaction.options.getString('message') || 'Get into CTA Comms — {time}';
@@ -665,10 +696,10 @@ async function handleAnnounce(interaction) {
   const when = parseAnnounceTime(timeInput, interaction.guildHall.timezone);
   if (!when) return interaction.editReply(`Couldn't understand "${timeInput}" as a time. Try something like \`9:30pm\` or \`2130\`.`);
 
-  const guild = getGuild();
-  const channel = guild?.channels.cache.get(ANNOUNCE_CHANNEL_ID);
+  const guild = getGuild(interaction.guildHall.discord_guild_id);
+  const channel = guild?.channels.cache.get(announceChannelId);
   if (!channel?.isTextBased()) {
-    return interaction.editReply('Announcement channel not found — check DISCORD_ANNOUNCE_CHANNEL_ID and bot permissions.');
+    return interaction.editReply('Announcement channel not found — check this server\'s announce channel and the bot\'s permissions.');
   }
 
   const unix = Math.floor(when.getTime() / 1000);
@@ -706,8 +737,8 @@ async function notifyAttendance(attendees, title, eventDate) {
 }
 
 // List voice channels the bot can see.
-function listVoiceChannels() {
-  const guild = getGuild();
+function listVoiceChannels(guildHall) {
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
   if (!guild) return [];
   return guild.channels.cache
     .filter((ch) => ch.type === 2) // GuildVoice
@@ -716,9 +747,11 @@ function listVoiceChannels() {
 }
 
 // Snap the current members in a voice channel.
-function getVoiceMembers(channelId) {
-  const guild = getGuild();
+function getVoiceMembers(guildHall, channelId) {
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
   if (!guild) return [];
+  // Looked up inside THIS guild's channel cache, so a channel id belonging to
+  // another tenant is simply not found rather than being snapshotted.
   const channel = guild.channels.cache.get(channelId);
   if (!channel || channel.type !== 2) return [];
   return channel.members.map((m) => ({

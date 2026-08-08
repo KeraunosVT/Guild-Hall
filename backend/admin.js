@@ -128,7 +128,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // ── Party member pool (Discord members with the member role) ────────────────
   router.get('/members', async (req, res) => {
     try {
-      const members = await listMembers();
+      const members = await listMembers(req.guild);
       if (supabase) {
         const [{ data: roleData, error: roleError }, ids] = await Promise.all([
           dbFor(req).from('member_roles').select('discord_id, pvp_role, pve_role, pvp_classes, pve_classes'),
@@ -534,7 +534,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
     const [catalog, discordMembers, ids] = await Promise.all([
       lootCatalog.getCatalog(req.guildId),
-      listMembers().catch(() => []),
+      listMembers(req.guild).catch(() => []),
       identities.load(req.guildId),
     ]);
 
@@ -941,11 +941,11 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     try {
       if (req.file) {
         const name = req.body?.name || 'Roster';
-        await postImage(req.file.buffer, 'roster.png', name);
+        await postImage(req.guild, req.file.buffer, 'roster.png', name);
       } else {
         const { name, parties } = req.body || {};
         if (!Array.isArray(parties)) return res.status(400).json({ error: 'Nothing to post.' });
-        await postEmbed(rosterEmbed(req.guild, name, parties));
+        await postEmbed(req.guild, rosterEmbed(req.guild, name, parties));
       }
       res.json({ ok: true });
     } catch (err) {
@@ -1124,12 +1124,12 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // ── Attendance: voice-channel snapshots ──────────────────────────────────────
   router.get('/voice-channels', (req, res) => {
     if (!gateway) return res.status(503).json({ error: 'Discord gateway not available.' });
-    res.json({ channels: gateway.listVoiceChannels() });
+    res.json({ channels: gateway.listVoiceChannels(req.guild) });
   });
 
   router.get('/voice-channels/:id/members', async (req, res) => {
     if (!gateway) return res.status(503).json({ error: 'Discord gateway not available.' });
-    const members = gateway.getVoiceMembers(req.params.id);
+    const members = gateway.getVoiceMembers(req.guild, req.params.id);
     // Prefer the guild's mapped display name (player_identities) over whatever
     // nickname/username Discord happens to show, same as /api/admin/members.
     if (supabase && members.length > 0) {
@@ -1181,7 +1181,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       try {
         const [unavailable, roster, ids] = await Promise.all([
           loa.unavailableOn(req.guild, { date: event.event_date, eventScheduleId: event.event_schedule_id || null }),
-          listMembers(),
+          listMembers(req.guild),
           identities.load(req.guildId),
         ]);
         const present = new Set((attendees || []).map((a) => String(a.discord_id)));
@@ -1354,8 +1354,8 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const [grants, roles, members] = await Promise.all([
       dbFor(req).from('permission_grants').select('*').order('granted_at', { ascending: false })
         .then((r) => r.data || []),
-      listRoles().catch((err) => { console.error('listRoles failed:', err.message); return []; }),
-      listMembers().catch(() => []),
+      listRoles(req.guild).catch((err) => { console.error('listRoles failed:', err.message); return []; }),
+      listMembers(req.guild).catch(() => []),
     ]);
     const roleIds = new Set(roles.map((r) => r.id));
     const memberIds = new Set(members.map((m) => m.id));
