@@ -49,9 +49,18 @@ module.exports = function createAuditLog(supabase) {
       // and that throw would land in a 'finish' listener where nothing can catch
       // it, so it goes inside the same try as the insert.
       try {
+        // Column names follow the multi-tenant baseline: what the single-tenant
+        // schema called discord_id/display_name is actor_id/actor_name here.
+        // The viewer still sees the old names — the read below aliases them back.
         tenantDb(supabase, req.guildId).from('audit_log').insert({
-          discord_id: req.user?.id,
-          display_name: req.user?.username || null,
+          actor_id: req.user?.id,
+          actor_name: req.user?.username || null,
+          // action is the baseline's only NOT NULL description column (method
+          // and path are both nullable there), so it carries the canonical
+          // "what happened" string and must always be populated. "POST
+          // /loot/awards" — greppable, stable, and never null even for a path
+          // that featureFor() has no label for.
+          action: `${req.method} ${req.path}`,
           method: req.method,
           path: req.path,
           feature: featureFor(req.path),
@@ -84,9 +93,19 @@ module.exports = function createAuditLog(supabase) {
     // Scoped read: an officer must never page through another guild's audit
     // trail. tenantDb applies .eq('guild_id', …) immediately after .select(),
     // so the filters and .range() below still chain exactly as before.
+    //
+    // The column list is explicit rather than '*' for two reasons: it aliases
+    // actor_id/actor_name back to the names the viewer has always used, so the
+    // rename stayed inside this file; and it keeps guild_id out of the response,
+    // since a tenant has no business seeing its own internal id echoed back.
+    const COLUMNS = 'id, discord_id:actor_id, display_name:actor_name, '
+      + 'action, method, path, feature, body, status_code, created_at';
+
     let query = tenantDb(supabase, req.guildId)
-      .from('audit_log').select('*', { count: 'exact' }).order('created_at', { ascending: false });
-    if (req.query.discord_id) query = query.eq('discord_id', req.query.discord_id);
+      .from('audit_log').select(COLUMNS, { count: 'exact' }).order('created_at', { ascending: false });
+    // Filters name real columns, not the aliases above — PostgREST resolves
+    // ?column=eq.x against the table, and knows nothing about the select alias.
+    if (req.query.discord_id) query = query.eq('actor_id', req.query.discord_id);
     if (req.query.feature) query = query.eq('feature', req.query.feature);
     if (req.query.from_date) query = query.gte('created_at', req.query.from_date);
     if (req.query.to_date) query = query.lte('created_at', `${req.query.to_date}T23:59:59`);
