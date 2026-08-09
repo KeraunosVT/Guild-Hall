@@ -138,24 +138,48 @@ console.log(`3. upserts: ${upserts} with an onConflict target, all include guild
 
 // ── 4. dbFor(req) only where req exists ─────────────────────────────────────
 // The bulk conversion rewrote `supabase.from(` to `dbFor(req).from(` by regex,
-// which happily rewrote module-level helpers that never had a `req`. Those
-// don't leak — they throw "req is not defined" and 500 the route — but they are
-// invisible until someone loads that exact page, and the player profile shipped
-// broken for exactly that reason. A scoped client must be passed in.
-const FN = /^(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*\{/gm;
+// which happily rewrote helpers that never had a `req`. Those don't leak — they
+// throw "req is not defined" and 500 the route — but they stay invisible until
+// someone exercises that exact path. The player profile shipped broken that
+// way, and so did saving a match.
+//
+// Matches at ANY indent, and const-arrow helpers as well as declarations: the
+// first version of this check was anchored to column 0, so it saw the
+// top-level helpers and missed every one nested inside a createX() factory —
+// which is where most of them live.
+const FN = /^([ 	]*)(?:const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>|(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\))/gm;
 let helpers = 0;
 for (const f of files) {
   const src = read(f);
   for (const m of src.matchAll(FN)) {
-    const [, name, params] = m;
+    const indent = m[1];
+    const name = m[2] || m[4];
+    const params = m[3] !== undefined ? m[3] : (m[5] || '');
     if (/\breq\b/.test(params)) continue;
-    const end = src.indexOf('\n}', m.index + m[0].length);
-    const body = src.slice(m.index + m[0].length, end === -1 ? undefined : end);
-    // A nested (req, res) handler inside re-introduces req legitimately.
+
+    // Only helpers with a BLOCK body. `const clean = (v, max) => String(v)…`
+    // has no braces, so "scan to the closing brace at this indent" ran straight
+    // past its end and swallowed the rest of the enclosing handler — which does
+    // legitimately use req. That reported a one-line string helper as a scoping
+    // bug.
+    if (src[m.index + m[0].length] !== ' ' && src[m.index + m[0].length] !== '{') continue;
+    const afterArrow = src.slice(m.index + m[0].length).replace(/^\s*/, '');
+    if (!afterArrow.startsWith('{')) continue;
+
+    // Body runs until a line that closes at this helper's own indent.
+    const start = m.index + m[0].length;
+    // A plain indexOf rather than a built RegExp: the closing token contains
+    // braces and parens that need escaping, and getting that wrong silently
+    // matches nothing — turning the whole check into a no-op that passes.
+    const rest = src.slice(start);
+    const closeAt = rest.indexOf('\n' + indent + '}');
+    const body = closeAt === -1 ? rest : rest.slice(0, closeAt);
+
+    // A nested (req, res[, next]) handler legitimately reintroduces req.
     if (/\(\s*req\s*,\s*res\b/.test(body)) continue;
     if (/\breq\b/.test(body)) {
       helpers++;
-      report(`REQ OUT OF SCOPE ${f}:${lineOf(src, m.index)}  function ${name}(${params}) uses req — pass the scoped client in instead`);
+      report(`REQ OUT OF SCOPE ${f}:${lineOf(src, m.index)}  ${name}(${params.trim().slice(0, 40)}) uses req — pass the scoped client in instead`);
     }
   }
 }

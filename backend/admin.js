@@ -347,10 +347,12 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // always stored: Lucent buys from the auction house, so plenty of requests
   // are for things the guild's drop catalog doesn't list, and snapshotting the
   // name keeps old requests readable after the catalog is edited.
-  const resolveItem = async (itemKey, itemName) => {
+  // Takes the guild-scoped client: this sits outside the route handlers, so
+  // there is no `req` here to derive one from.
+  const resolveItem = async (db, itemKey, itemName) => {
     const typed = String(itemName ?? '').trim();
     if (itemKey) {
-      const { data } = await dbFor(req).from('loot_items').select('key, name').eq('key', itemKey).maybeSingle();
+      const { data } = await db.from('loot_items').select('key, name').eq('key', itemKey).maybeSingle();
       if (!data) return { error: 'Unknown item.' };
       return { item_key: data.key, item_name: data.name };
     }
@@ -379,7 +381,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (!discord_id) return res.status(400).json({ error: 'Member is required.' });
     const amt = parseInt(amount, 10);
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Amount must be a positive number.' });
-    const item = await resolveItem(item_key, item_name);
+    const item = await resolveItem(dbFor(req), item_key, item_name);
     if (item.error) return res.status(400).json({ error: item.error });
 
     const id = crypto.randomUUID();
@@ -418,7 +420,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     // Explicit null clears the link when an edit swaps a potential for gear.
     if (potential_id !== undefined) update.potential_id = Number.isInteger(potential_id) ? potential_id : null;
     if (item_key !== undefined || item_name !== undefined) {
-      const item = await resolveItem(item_key, item_name);
+      const item = await resolveItem(dbFor(req), item_key, item_name);
       if (item.error) return res.status(400).json({ error: item.error });
       Object.assign(update, item);
     }
@@ -1037,8 +1039,11 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // Create-or-replace a match and all its player rows in ONE transaction via
   // the save_match Postgres function (see migrations/001_atomic_match_save.sql).
   // A failure anywhere rolls back everything — no orphan matches, no lost rows.
-  async function saveMatch(matchId, { title, match_date, result, map, players }) {
-    const { data, error } = await dbFor(req).rpc('save_match', {
+  // Takes the guild-scoped client. It lives outside the route handlers, so
+  // there is no `req` in scope to build one from — the bulk conversion wrote
+  // dbFor(req) in here anyway and every match save died on "req is not defined".
+  async function saveMatch(db, matchId, { title, match_date, result, map, players }) {
+    const { data, error } = await db.rpc('save_match', {
       p_id: matchId,
       p_title: clean(title) || 'Wargame',
       p_match_date: clean(match_date),
@@ -1067,7 +1072,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
     const matchId = crypto.randomUUID();
     try {
-      const inserted = await saveMatch(matchId, req.body);
+      const inserted = await saveMatch(dbFor(req), matchId, req.body);
       res.json({ match_id: matchId, inserted });
     } catch (err) {
       console.error('Match commit error:', err.message);
@@ -1105,7 +1110,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (chk || !existing) return res.status(404).json({ error: 'Match not found.' });
 
     try {
-      const updated = await saveMatch(matchId, req.body);
+      const updated = await saveMatch(dbFor(req), matchId, req.body);
       res.json({ match_id: matchId, updated });
     } catch (err) {
       console.error('Match update error:', err.message);
