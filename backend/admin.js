@@ -119,7 +119,9 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   };
 
   const attendance = supabase ? createAttendance(supabase) : null;
-  const loa = supabase ? createLoa(supabase) : null;
+  // identities is passed so LOA names resolve to the site alias, matching
+  // what the website and the /loa command show.
+  const loa = supabase ? createLoa(supabase, identities) : null;
 
   router.get('/whoami', (req, res) => {
     res.json({ admin: true, username: req.user.username });

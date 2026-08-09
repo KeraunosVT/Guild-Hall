@@ -227,7 +227,51 @@ export default function LootRequests() {
 
   const startEdit = (r) => {
     setEditingId(r.id);
-    setEdit({ amount: String(r.amount), note: r.note || '', request_type: r.request_type || '' });
+    setEdit({
+      amount: String(r.amount), note: r.note || '', request_type: r.request_type || '',
+      item_name: r.item_name || '',
+    });
+  };
+
+  // Every catalog item and every market-priced potential, as one suggestion
+  // list. Flat rather than grouped because a datalist has no optgroups.
+  const itemSuggestions = useMemo(() => {
+    const names = [];
+    catalog.forEach((c) => (c.items || []).forEach((i) => names.push(i.name)));
+    pickablePotentials.forEach((p) => names.push(p.label));
+    return [...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }, [catalog, pickablePotentials]);
+
+  // Turn a typed name back into whatever it actually is: a catalog item, a
+  // market potential, or neither. Anything unrecognised stays free text —
+  // Lucent buys from the auction house, so plenty of requests name gear the
+  // guild's drop table has never listed.
+  const resolveItemName = (name) => {
+    const q = String(name || '').trim().toLowerCase();
+    if (!q) return null;
+    for (const c of catalog) {
+      const hit = (c.items || []).find((i) => String(i.name).toLowerCase() === q);
+      if (hit) return { item_key: hit.key, item_name: hit.name, potential_id: null };
+    }
+    const pot = pickablePotentials.find((p) => String(p.label).toLowerCase() === q);
+    if (pot) return { item_key: null, item_name: pot.label, potential_id: pot.potentialId };
+    return { item_key: null, item_name: String(name).trim().slice(0, 200), potential_id: null };
+  };
+
+  // Only send the item fields when the NAME ACTUALLY CHANGED.
+  //
+  // Re-resolving on every save would quietly break renames: edit a note on a
+  // request whose catalog item has since been renamed, and the stored name no
+  // longer matches anything, so it would resolve to free text and drop the
+  // item_key — losing the link to the catalog for a save that never touched
+  // the item. Untouched name, untouched item fields.
+  const saveEdit = (r) => {
+    const body = { amount: edit.amount, note: edit.note, request_type: edit.request_type };
+    const typed = String(edit.item_name || '').trim();
+    if (typed && typed !== String(r.item_name || '').trim()) {
+      Object.assign(body, resolveItemName(typed));
+    }
+    patch(r.id, body, 'Request updated.');
   };
 
   if (!can('loot.requests')) return <RestrictedGate />;
@@ -242,6 +286,9 @@ export default function LootRequests() {
         Lucent grant on the <span className="text-bone">Lucent &amp; Shards</span> ledger, so it&apos;s only entered once.
       </p>
 
+      <datalist id="lucent-request-items">
+        {itemSuggestions.map((n) => <option key={n} value={n} />)}
+      </datalist>
       <datalist id="lucent-request-types">
         {knownTypes.map((t) => <option key={t} value={t} />)}
       </datalist>
@@ -321,16 +368,21 @@ export default function LootRequests() {
                   <input type="text" value={edit.request_type} maxLength={60} placeholder="Type" list="lucent-request-types"
                     onChange={(e) => setEdit((p) => ({ ...p, request_type: e.target.value }))}
                     className="bg-panel border border-line rounded-lg px-2 py-1 text-sm text-bone focus:outline-none focus:border-brass w-32" />
-                  <span className="text-ash w-64 shrink-0 truncate" title={r.item_name}>{r.item_name}</span>
+                  <input type="text" value={edit.item_name} maxLength={200} placeholder="Item"
+                    list="lucent-request-items" autoComplete="off"
+                    title="Catalog items and market-priced potentials are suggested; anything else is kept as free text."
+                    onChange={(e) => setEdit((p) => ({ ...p, item_name: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(r); if (e.key === 'Escape') setEditingId(null); }}
+                    className="bg-panel border border-line rounded-lg px-2 py-1 text-sm text-bone focus:outline-none focus:border-brass w-64 shrink-0" />
                   <input type="number" min={1} value={edit.amount} autoFocus
                     onChange={(e) => setEdit((p) => ({ ...p, amount: e.target.value }))}
                     className="bg-panel border border-line rounded-lg px-2 py-1 text-sm text-bone focus:outline-none focus:border-brass w-28" />
                   <span className="w-28 shrink-0" />
                   <input type="text" value={edit.note} maxLength={300} placeholder="Note (optional)"
                     onChange={(e) => setEdit((p) => ({ ...p, note: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') patch(r.id, edit, 'Request updated.'); if (e.key === 'Escape') setEditingId(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(r); if (e.key === 'Escape') setEditingId(null); }}
                     className="bg-panel border border-line rounded-lg px-2 py-1 text-sm text-bone focus:outline-none focus:border-brass flex-1 min-w-[140px]" />
-                  <button onClick={() => patch(r.id, edit, 'Request updated.')} className="text-brass hover:text-brassbright shrink-0" title="Save">
+                  <button onClick={() => saveEdit(r)} className="text-brass hover:text-brassbright shrink-0" title="Save">
                     <Check className="w-4 h-4" />
                   </button>
                   <button onClick={() => setEditingId(null)} className="text-ash hover:text-bone shrink-0" title="Cancel">

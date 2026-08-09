@@ -154,7 +154,44 @@ function todayInGuildTz(guild) {
   return shifted.toLocaleDateString('en-CA', { timeZone: tzOf(guild) });
 }
 
-module.exports = function createLoa(supabase) {
+// `identities` is optional so a caller that doesn't have one still works — it
+// only ever improves the name shown, never gates the LOA itself.
+module.exports = function createLoa(supabase, identities = null) {
+  // The site's canonical display name for a member, falling back to whatever
+  // the caller had (a Discord username, or an officer's typed name).
+  //
+  // Resolved at SUBMIT time so the stored row and the Discord announcement both
+  // carry the alias rather than the raw Discord username — otherwise an LOA
+  // filed via /loa reads differently from the same LOA filed on the site.
+  async function resolveDisplayName(guild, discordId, fallback) {
+    if (!identities || !discordId) return fallback;
+    try {
+      const ids = await identities.load(guild.id);
+      return ids.displayNameFor(discordId, fallback) || fallback;
+    } catch (err) {
+      // A name lookup must never sink an LOA submission.
+      console.warn('loa: identity lookup failed, using the supplied name:', err.message);
+      return fallback;
+    }
+  }
+
+  // Re-resolve names on READ. display_name on the row is only a snapshot from
+  // the moment it was filed, so an alias changed afterwards would keep showing
+  // the old name everywhere the entry appears.
+  async function withNames(guild, rows) {
+    if (!identities || !rows || !rows.length) return rows || [];
+    try {
+      const ids = await identities.load(guild.id);
+      return rows.map((r) => ({
+        ...r,
+        display_name: ids.displayNameFor(r.discord_id, r.display_name),
+      }));
+    } catch (err) {
+      console.warn('loa: identity lookup failed, showing stored names:', err.message);
+      return rows;
+    }
+  }
+
   const isValidDate = (dateStr) => DATE_RE.test(dateStr || '');
   const requireReason = (reason) => {
     const trimmed = (reason || '').trim();
@@ -248,7 +285,10 @@ module.exports = function createLoa(supabase) {
         const prev = out.get(e.discord_id);
         if (!prev || (prev.partial && !entry.partial)) out.set(e.discord_id, entry);
       });
-      return [...out.values()];
+      // Same re-resolution as the other reads: this rollup is what the roster
+      // builder shows beside each member, so a stale name here is the most
+      // visible place to get it wrong.
+      return withNames(guild, [...out.values()]);
     },
 
     // `eventScheduleId` and `startTime` are each optional, but at least one is
@@ -279,9 +319,11 @@ module.exports = function createLoa(supabase) {
         eventName = ev.name;
       }
 
+      const resolvedName = await resolveDisplayName(guild, discordId, displayName);
+
       const { data: row, error } = await db.from('loa_entries').insert({
         discord_id: discordId,
-        display_name: (displayName || '').slice(0, 120),
+        display_name: (resolvedName || '').slice(0, 120),
         type: 'event',
         event_date: eventDate,
         event_schedule_id: eventScheduleId || null,
@@ -292,17 +334,21 @@ module.exports = function createLoa(supabase) {
         reason: cleanReason.slice(0, 500),
       }).select('id').single();
       if (error) { console.error('loa.submitEvent error:', error.message); throw httpError(500, 'Failed to submit LOA.'); }
-      return { id: row.id, eventName };
+      // The cleaned times go back with it: "9pm" is accepted on the way in but
+      // isn't displayable, so an announcement built from the raw input would
+      // show something the record doesn't contain.
+      return { id: row.id, eventName, displayName: resolvedName, startTime: cleanStart, endTime: cleanEnd };
     },
 
     async submitRange(guild, { discordId, displayName, startDate, endDate, reason }) {
       if (!isValidDate(startDate) || !isValidDate(endDate)) throw httpError(400, 'Dates must be in YYYY-MM-DD format.');
       if (new Date(endDate) < new Date(startDate)) throw httpError(400, 'End date must be after start date.');
       const cleanReason = requireReason(reason);
+      const resolvedName = await resolveDisplayName(guild, discordId, displayName);
 
       const { data: row, error } = await tenantDb(supabase, guild.id).from('loa_entries').insert({
         discord_id: discordId,
-        display_name: (displayName || '').slice(0, 120),
+        display_name: (resolvedName || '').slice(0, 120),
         type: 'range',
         event_date: null,
         event_schedule_id: null,
@@ -311,7 +357,7 @@ module.exports = function createLoa(supabase) {
         reason: cleanReason.slice(0, 500),
       }).select('id').single();
       if (error) { console.error('loa.submitRange error:', error.message); throw httpError(500, 'Failed to submit LOA.'); }
-      return { id: row.id };
+      return { id: row.id, displayName: resolvedName, startDate, endDate };
     },
 
     // Recurs every week on `dayOfWeek` (0=Sunday..6=Saturday) until cancelled.
@@ -338,9 +384,11 @@ module.exports = function createLoa(supabase) {
         eventName = ev.name;
       }
 
+      const resolvedName = await resolveDisplayName(guild, discordId, displayName);
+
       const { data: row, error } = await db.from('loa_entries').insert({
         discord_id: discordId,
-        display_name: (displayName || '').slice(0, 120),
+        display_name: (resolvedName || '').slice(0, 120),
         type: 'recurring',
         event_date: null,
         event_schedule_id: eventScheduleId || null,
@@ -352,7 +400,7 @@ module.exports = function createLoa(supabase) {
         reason: cleanReason.slice(0, 500),
       }).select('id').single();
       if (error) { console.error('loa.submitRecurring error:', error.message); throw httpError(500, 'Failed to submit LOA.'); }
-      return { id: row.id, eventName };
+      return { id: row.id, eventName, displayName: resolvedName, dayOfWeek: dow, startTime: cleanStart, endTime: cleanEnd };
     },
 
     // Best-effort — called after announceLoa() posts to Discord, to remember
@@ -370,18 +418,18 @@ module.exports = function createLoa(supabase) {
       const { data, error } = await tenantDb(supabase, guild.id).from('loa_entries').select('*')
         .eq('discord_id', discordId).order('created_at', { ascending: false });
       if (error) throw httpError(500, 'Failed to load LOAs.');
-      return data || [];
+      return withNames(guild, data || []);
     },
 
     async all(guild, isAdmin) {
       const { data, error } = await tenantDb(supabase, guild.id)
         .from('loa_entries').select('*').order('created_at', { ascending: false });
       if (error) throw httpError(500, 'Failed to load LOAs.');
-      return (data || []).map((e) => {
+      return withNames(guild, (data || []).map((e) => {
         const out = { ...e };
         if (!isAdmin) delete out.reason;
         return out;
-      });
+      }));
     },
 
     async cancel(guild, id, discordId, isAdmin) {

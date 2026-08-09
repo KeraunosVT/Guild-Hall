@@ -111,7 +111,9 @@ const lootCatalog = supabase ? createLootCatalog(supabase) : null;
 const eliteTimers = supabase ? createEliteTimers(supabase) : null;
 const gearIlvl = supabase ? createGearIlvl(supabase) : null;
 const identities = supabase ? createIdentities(supabase) : null;
-const loa = supabase ? createLoa(supabase) : null;
+// identities is built above: LOA display names resolve through it so an
+// entry reads the same on the site, via /loa, and in the Discord post.
+const loa = supabase ? createLoa(supabase, identities) : null;
 const auditLog = supabase ? createAuditLog(supabase) : null;
 // Guild resolution needs the client to read the tenant registry, so it's built
 // here alongside the other factories rather than imported as a bare middleware.
@@ -577,20 +579,48 @@ app.post('/api/loa', async (req, res) => {
   const targetId = onBehalf ? discord_id : req.user.id;
   const targetName = onBehalf ? (display_name || 'Member') : req.user.username;
   try {
+    let result;
+    let entry;
     if (type === 'event') {
-      await loa.submitEvent(req.guild, { discordId: targetId, displayName: targetName, eventDate: event_date, eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
+      result = await loa.submitEvent(req.guild, { discordId: targetId, displayName: targetName, eventDate: event_date, eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
+      entry = { type: 'event', eventDate: event_date };
     } else if (type === 'range') {
-      await loa.submitRange(req.guild, { discordId: targetId, displayName: targetName, startDate: start_date, endDate: end_date, reason });
+      result = await loa.submitRange(req.guild, { discordId: targetId, displayName: targetName, startDate: start_date, endDate: end_date, reason });
+      entry = { type: 'range', startDate: start_date, endDate: end_date };
     } else if (type === 'recurring') {
-      await loa.submitRecurring(req.guild, { discordId: targetId, displayName: targetName, dayOfWeek: parseInt(day_of_week, 10), eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
+      result = await loa.submitRecurring(req.guild, { discordId: targetId, displayName: targetName, dayOfWeek: parseInt(day_of_week, 10), eventScheduleId: event_schedule_id, startTime: start_time, endTime: end_time, reason });
+      entry = { type: 'recurring' };
     } else {
       return res.status(400).json({ error: 'Type must be "event", "range", or "recurring".' });
     }
+
+    // Answer first. The LOA is already saved by this point, and Discord is a
+    // third party that can be slow or down — awaiting it here made a perfectly
+    // successful save look like a failure to whoever filed it.
     res.json({ ok: true });
+
+    // Then announce, unawaited. Built from what submit* RETURNED, not from the
+    // request body: the returned values are the cleaned, stored ones, and the
+    // display name is the site alias, so this reads identically to the same LOA
+    // filed through /loa in Discord.
+    announceLoaFor(req.guild, { ...entry, ...result });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+// Post an LOA to the guild's Discord channel and remember the message id, so
+// cancelling the entry can delete the announcement too. Entirely best-effort:
+// the response has already gone out, so nothing here can be surfaced to the
+// caller and a failure must never become an unhandled rejection.
+async function announceLoaFor(guild, entry) {
+  try {
+    const messageId = await gateway.announceLoaEntry(guild, entry);
+    if (messageId && entry.id) await loa.setMessageId(guild, entry.id, messageId);
+  } catch (err) {
+    console.error('LOA announce failed:', err.message);
+  }
+}
 
 // Delete own LOA
 app.delete('/api/loa/:id', async (req, res) => {

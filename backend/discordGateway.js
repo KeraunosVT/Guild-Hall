@@ -65,8 +65,12 @@ let db = null;
 function wireModules(supabase) {
   db = supabase;
   eliteTimers = supabase ? createEliteTimers(supabase) : null;
-  loa = supabase ? createLoa(supabase) : null;
+  // identities BEFORE loa: loa takes it so LOA names resolve to the site alias
+  // rather than the Discord username. Built the other way round it would have
+  // received `null` and silently fallen back — the LOA would still save, it
+  // would just show the wrong name, which is the hardest kind of wrong to spot.
   identities = supabase ? createIdentities(supabase) : null;
+  loa = supabase ? createLoa(supabase, identities) : null;
   attendance = supabase ? createAttendance(supabase) : null;
 }
 
@@ -369,6 +373,36 @@ function discordDate(dateStr) {
   return `<t:${unix}:D>`;
 }
 
+// The announcement text for one LOA, built in ONE place.
+//
+// This used to be assembled inline in each /loa handler, and the website didn't
+// announce at all — so the two paths had already drifted and a third would have
+// drifted again. Everything it needs comes from what submit* returns, which is
+// the CLEANED record: "9pm" is accepted on the way in but isn't displayable, so
+// text built from the raw input shows something the stored row doesn't contain.
+function loaAnnouncement({ type, displayName, eventName, eventDate, startDate, endDate, dayOfWeek, startTime, endTime }) {
+  const who = `📋 **${displayName || 'Member'}**`;
+  const scope = eventName ? ` for **${eventName}**` : '';
+  const window = startTime
+    ? (endTime ? ` from **${fmt12h(startTime)}** to **${fmt12h(endTime)}**` : ` from **${fmt12h(startTime)}**`)
+    : '';
+
+  if (type === 'range') {
+    return `${who} is on LOA — ${discordDate(startDate)} to ${discordDate(endDate)}`;
+  }
+  if (type === 'recurring') {
+    return `${who} is always on LOA every **${DAY_NAMES[dayOfWeek]}**${window}${scope}`;
+  }
+  return `${who} is on LOA${scope} — ${discordDate(eventDate)}${window}`;
+}
+
+// Build and post one LOA announcement, returning the message id so the caller
+// can record it (cancelling an LOA deletes its announcement). Exported so the
+// website's POST /api/loa announces identically to the slash command.
+async function announceLoaEntry(guildHall, entry) {
+  return announceLoa(guildHall, loaAnnouncement(entry));
+}
+
 // Posts an LOA submission to the configured channel. Best-effort — a failure
 // here (missing channel, missing permissions) shouldn't undo the LOA itself,
 // which is already recorded by the time this runs. Returns the sent message's
@@ -440,7 +474,7 @@ async function handleLoaEvent(interaction) {
   }
 
   try {
-    const { id, eventName } = await loa.submitEvent(interaction.guildHall, {
+    const { id, eventName, displayName, startTime: outStart, endTime: outEnd } = await loa.submitEvent(interaction.guildHall, {
       discordId: target.discordId,
       displayName: target.displayName,
       eventDate: date,
@@ -450,11 +484,15 @@ async function handleLoaEvent(interaction) {
       reason,
     });
     const scope = eventName ? ` for **${eventName}**` : '';
-    const timeRange = startTime ? (endTime ? ` from **${fmt12h(startTime)}** to **${fmt12h(endTime)}**` : ` from **${fmt12h(startTime)}**`) : '';
+    const timeRange = outStart ? (outEnd ? ` from **${fmt12h(outStart)}** to **${fmt12h(outEnd)}**` : ` from **${fmt12h(outStart)}**`) : '';
+    // `displayName` here is the site alias resolved at submit time, not the
+    // Discord username — so the confirmation matches what everyone else sees.
     await interaction.editReply(target.onBehalf
-      ? `Recorded ✅ — LOA submitted for **${target.displayName}** on ${date}${timeRange}${scope}.`
+      ? `Recorded ✅ — LOA submitted for **${displayName}** on ${date}${timeRange}${scope}.`
       : `Recorded ✅ — LOA submitted for ${date}${timeRange}${scope}.`);
-    const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is on LOA${scope} — ${discordDate(date)}${timeRange}`);
+    const messageId = await announceLoaEntry(interaction.guildHall, {
+      type: 'event', displayName, eventName, eventDate: date, startTime: outStart, endTime: outEnd,
+    });
     if (messageId) await loa.setMessageId(interaction.guildHall, id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
@@ -473,15 +511,17 @@ async function handleLoaRange(interaction) {
   const reason = interaction.options.getString('reason') || '';
 
   try {
-    const { id } = await loa.submitRange(interaction.guildHall, {
+    const { id, displayName } = await loa.submitRange(interaction.guildHall, {
       discordId: target.discordId,
       displayName: target.displayName,
       startDate, endDate, reason,
     });
     await interaction.editReply(target.onBehalf
-      ? `Recorded ✅ — LOA submitted for **${target.displayName}**, ${startDate} to ${endDate}.`
+      ? `Recorded ✅ — LOA submitted for **${displayName}**, ${startDate} to ${endDate}.`
       : `Recorded ✅ — LOA submitted for ${startDate} to ${endDate}.`);
-    const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is on LOA — ${discordDate(startDate)} to ${discordDate(endDate)}`);
+    const messageId = await announceLoaEntry(interaction.guildHall, {
+      type: 'range', displayName, startDate, endDate,
+    });
     if (messageId) await loa.setMessageId(interaction.guildHall, id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
@@ -511,7 +551,7 @@ async function handleLoaRecurring(interaction) {
   }
 
   try {
-    const { id, eventName } = await loa.submitRecurring(interaction.guildHall, {
+    const { id, eventName, displayName, startTime: outStart, endTime: outEnd } = await loa.submitRecurring(interaction.guildHall, {
       discordId: target.discordId,
       displayName: target.displayName,
       dayOfWeek: dow,
@@ -521,11 +561,13 @@ async function handleLoaRecurring(interaction) {
       reason,
     });
     const scope = eventName ? ` for **${eventName}**` : '';
-    const timeRange = startTime ? (endTime ? ` from **${fmt12h(startTime)}** to **${fmt12h(endTime)}**` : ` from **${fmt12h(startTime)}**`) : '';
+    const timeRange = outStart ? (outEnd ? ` from **${fmt12h(outStart)}** to **${fmt12h(outEnd)}**` : ` from **${fmt12h(outStart)}**`) : '';
     await interaction.editReply(target.onBehalf
-      ? `Recorded ✅ — **${target.displayName}** is now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`
+      ? `Recorded ✅ — **${displayName}** is now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`
       : `Recorded ✅ — you're now always out on **${DAY_NAMES[dow]}**${timeRange}${scope}.`);
-    const messageId = await announceLoa(interaction.guildHall, `📋 **${target.displayName}** is always on LOA every **${DAY_NAMES[dow]}**${timeRange}${scope}`);
+    const messageId = await announceLoaEntry(interaction.guildHall, {
+      type: 'recurring', displayName, eventName, dayOfWeek: dow, startTime: outStart, endTime: outEnd,
+    });
     if (messageId) await loa.setMessageId(interaction.guildHall, id, messageId);
   } catch (err) {
     await interaction.editReply(err.message || 'Something went wrong submitting that LOA.');
@@ -764,7 +806,7 @@ function getVoiceMembers(guildHall, channelId) {
   }));
 }
 
-module.exports = { start, listVoiceChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance };
+module.exports = { start, listVoiceChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry };
 
 // ── Test seam ───────────────────────────────────────────────────────────────
 // The interaction path is the highest-risk code in this project (plan task 12):
