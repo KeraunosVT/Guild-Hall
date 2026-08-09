@@ -104,9 +104,24 @@ const RESPONSE_SCHEMA = {
   },
 };
 
+// A failure that retrying cannot fix. Marked explicitly rather than left to be
+// guessed from the message: "screenshot reading is unavailable" happens to
+// contain the word "unavailable", which the caller's transient-error heuristic
+// read as "the reader is busy" — so a server missing its API key told officers
+// to retry, forever, and every retry failed the same way.
+function permanentError(message) {
+  const err = new Error(message);
+  err.retryable = false;
+  return err;
+}
+
 async function parseScreenshot(buffer, mimeType) {
   if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not set — screenshot reading is unavailable.');
+    console.error('parseScreenshot: GEMINI_API_KEY is not set — screenshot reading is disabled.');
+    throw permanentError(
+      'Screenshot reading is not set up on this server, so images cannot be read. '
+      + 'Uploading a CSV still works. Ask whoever runs Guild Hall to add the reader key.',
+    );
   }
 
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });

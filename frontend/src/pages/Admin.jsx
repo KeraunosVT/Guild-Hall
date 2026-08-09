@@ -174,8 +174,8 @@ export default function Admin() {
     setRunning(false);
   };
 
-  const parseAll = () => runPool(items.filter((it) => it.status === 'idle' || it.status === 'failed'));
-  const retryFailed = () => runPool(items.filter((it) => it.status === 'failed'));
+  const parseAll = () => runPool(items.filter((it) => it.status === 'idle' || (it.status === 'failed' && it.retryable)));
+  const retryFailed = () => runPool(items.filter((it) => it.status === 'failed' && it.retryable));
   const retryOne = (id) => { const it = items.find((x) => x.id === id); if (it) runPool([it], 1); };
 
   // Merge every successfully-read file into the reviewed set.
@@ -328,7 +328,8 @@ export default function Admin() {
 
                 <div className="panel rounded-lg divide-y divide-line">
                   {items.map((it) => (
-                    <div key={it.id} className="flex items-center gap-3 px-3 py-2">
+                    <div key={it.id} className="px-3 py-2">
+                    <div className="flex items-center gap-3">
                       {/\.csv$/i.test(it.file.name) ? <FileSpreadsheet className="w-4 h-4 text-brass shrink-0" /> : <ImageIcon className="w-4 h-4 text-brass shrink-0" />}
                       <span className="text-sm text-bone truncate flex-1">{it.file.name}</span>
 
@@ -349,12 +350,19 @@ export default function Admin() {
                         <button onClick={() => removeFile(it.id)} className="text-ash hover:text-oxblood shrink-0" aria-label="Remove"><X className="w-4 h-4" /></button>
                       )}
                     </div>
+                    {/* Say why. A bare "Failed" is the same word whether the
+                        reader hiccuped or the server has no reader at all —
+                        and only one of those is worth retrying. */}
+                    {it.status === 'failed' && it.error && (
+                      <p className="text-xs text-ash mt-1 pl-7 leading-snug">{it.error}</p>
+                    )}
+                    </div>
                   ))}
                 </div>
 
-                {items.some((it) => it.status === 'failed') && !running && (
+                {items.some((it) => it.status === 'failed' && it.retryable) && !running && (
                   <button onClick={retryFailed} className="text-sm text-brass hover:text-brassbright inline-flex items-center gap-1.5">
-                    <RotateCw className="w-4 h-4" /> Retry {items.filter((it) => it.status === 'failed').length} failed
+                    <RotateCw className="w-4 h-4" /> Retry {items.filter((it) => it.status === 'failed' && it.retryable).length} failed
                   </button>
                 )}
               </div>

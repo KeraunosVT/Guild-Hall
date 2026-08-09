@@ -971,8 +971,8 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     } catch (err) {
       const msg = err.message || 'Could not read that file.';
       console.error('Parse-one error:', msg);
-      const busy = /overload|rate.?limit|429|503|busy|unavailable|timeout|temporar/i.test(msg);
-      res.status(busy ? 503 : 502).json({ error: busy ? `The reader is busy — ${msg}` : msg, retryable: busy });
+      res.status(isRetryable(err) ? 503 : 502)
+        .json({ error: isRetryable(err) ? `The reader is busy — ${msg}` : msg, retryable: isRetryable(err) });
     }
   });
 
@@ -982,6 +982,19 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const fileCount = Number(req.body?.fileCount) || 0;
     res.json(mergePlayers(all, fileCount));
   });
+
+  // Is this worth retrying? An explicit err.retryable === false always wins —
+  // configuration and credential problems are permanent, and telling someone to
+  // retry them wastes their time and hides the real cause. Only then do we fall
+  // back to reading the message for signs of a transient upstream hiccup.
+  const isRetryable = (err) => {
+    if (err && err.retryable === false) return false;
+    const msg = (err && err.message) || '';
+    // Credential and quota-exhaustion failures come back from the model API as
+    // prose; none of them get better by pressing Retry.
+    if (/api[ _-]?key|permission.?denied|unauthor|invalid[ _-]?argument|billing|quota exceeded/i.test(msg)) return false;
+    return /overload|rate.?limit|429|503|busy|unavailable|timeout|temporar/i.test(msg);
+  };
 
   // ── Parse one or more uploads into merged draft rows (batch; no DB writes) ──
   router.post('/match/parse', upload.array('files', 20), async (req, res) => {
