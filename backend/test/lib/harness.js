@@ -160,10 +160,20 @@ async function insertSeed(guildId, m, n, tag) {
 }
 
 // Remove anything these fixtures created, in reverse dependency order.
+//
+// Storage too: deleting the guilds row cascades across TABLES, but the assets
+// bucket knows nothing about foreign keys, so uploaded icons would pile up one
+// folder per run forever. They live under loot-icons/<guild_id>/ precisely so
+// they can be found and removed by guild.
 async function purge(guildIds) {
   if (!guildIds.length) return;
   for (const table of [...SCOPED_TABLES, 'player_match_stats', 'event_attendance'].reverse()) {
     await supabase.from(table).delete().in('guild_id', guildIds);
+  }
+  for (const id of guildIds) {
+    const { data: objects } = await supabase.storage.from('assets').list(`loot-icons/${id}`);
+    const paths = (objects || []).map((o) => `loot-icons/${id}/${o.name}`);
+    if (paths.length) await supabase.storage.from('assets').remove(paths);
   }
   await supabase.from('guilds').delete().in('id', guildIds);
 }

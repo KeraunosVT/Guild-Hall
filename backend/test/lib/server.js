@@ -31,6 +31,16 @@ function startServer(extraEnv = {}) {
     env: {
       ...process.env,
       PORT: String(port), SINGLE_GUILD_ID: '', DISCORD_BOT_TOKEN: '',
+      // Point the SERVER at the same database the fixtures are written to.
+      // Without this the harness seeds the test project while the app under
+      // test reads SUPABASE_URL — production — so every login answered
+      // "not_member" for guilds that demonstrably existed. Two halves of one
+      // test looking at two different databases is the kind of failure that
+      // sends you hunting through auth logic that was never wrong.
+      ...(process.env.TEST_SUPABASE_URL ? {
+        SUPABASE_URL: process.env.TEST_SUPABASE_URL,
+        SUPABASE_SERVICE_KEY: process.env.TEST_SUPABASE_SERVICE_KEY,
+      } : {}),
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
