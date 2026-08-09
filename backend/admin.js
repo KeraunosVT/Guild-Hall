@@ -638,7 +638,18 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const f = req.file;
     if (!f) return res.status(400).json({ error: 'No image uploaded.' });
     const ext = f.mimetype === 'image/png' ? 'png' : f.mimetype === 'image/webp' ? 'webp' : 'jpg';
-    const path = `loot-icons/${req.params.key}.${ext}`;
+
+    // The bucket is shared and public, so the guild has to be IN THE PATH.
+    // Item keys are `${category}__${questlog_id}` derived from the global
+    // questlog table, which means two guilds adding the same item get byte-
+    // identical keys by construction — not by coincidence. With a flat path and
+    // upsert:true, whichever guild uploaded last replaced the icon shown to
+    // every other guild. Row-level scoping cannot help here: storage isn't rows.
+    //
+    // The key is also sanitised because it lands in a path unfiltered: `..` and
+    // `/` in an item key would otherwise let an upload escape its own folder.
+    const safeKey = String(req.params.key).replace(/[^a-z0-9_-]/gi, '_').slice(0, 120);
+    const path = `loot-icons/${req.guildId}/${safeKey}.${ext}`;
     const { error: upErr } = await supabase.storage.from('assets').upload(path, f.buffer, {
       contentType: f.mimetype, upsert: true,
     });

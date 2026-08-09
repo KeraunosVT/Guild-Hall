@@ -31,6 +31,9 @@ const section = (t) => console.log('\n' + t);
 (async () => {
   const fx = await setup();
   const srv = await startServer();
+  // Item keys are derived from the global questlog table, so a key really is
+  // shared across guilds. Seed the same one in both to reproduce that.
+  const SHARED_KEY = 'weapons__12345';
   const { A, B, dataA, dataB, A_MARK, B_MARK } = fx;
 
   const call = (p, { token = fx.officerA, guild = A.id, ...init } = {}) => fetch(srv.BASE + p, {
@@ -250,6 +253,58 @@ const section = (t) => console.log('\n' + t);
     check('no role / channel / billing fields exposed', !exposed.length, exposed.join(', '));
     const outsiderCfg = await call('/api/guild', { token: fx.officerB, guild: A.id });
     check('non-member refused their own guild config', outsiderCfg.status === 403, 'HTTP ' + outsiderCfg.status);
+
+    // ── 4d. STORAGE IS SCOPED TOO ───────────────────────────────────────────
+    // Every other check here is about rows. The assets bucket is shared and
+    // public, so it obeys none of the row scoping — and loot item keys are
+    // derived from the global questlog table, so two guilds genuinely do hold
+    // the same key. Upload the SAME key as both guilds and require the two
+    // objects to be different bytes at different URLs.
+    section('4d. uploaded icons do not collide across guilds');
+    const png = (byte) => {
+      // Smallest valid 1x1 PNG, with one byte varied so the two are distinguishable.
+      const b = Buffer.from(
+        '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63'
+        + '6060600000000400012734270a0000000049454e44ae426082', 'hex');
+      b[b.length - 12] = byte;
+      return b;
+    };
+    const upload = async (guildId, token, byte) => {
+      const form = new FormData();
+      form.append('image', new Blob([png(byte)], { type: 'image/png' }), 'icon.png');
+      const r = await fetch(srv.BASE + `/api/admin/loot/items/${SHARED_KEY}/image`, {
+        method: 'POST',
+        headers: { cookie: `gh_session=${token}`, 'x-guild-id': guildId },
+        body: form,
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    };
+
+    // Both guilds legitimately hold this key — that is the whole point.
+    for (const g of [A, B]) {
+      await fx.supabase.from('loot_items').insert({
+        guild_id: g.id, key: SHARED_KEY, category_key: `cat_${g.id === A.id ? A_MARK : B_MARK}`,
+        name: 'Shared Item', sort_order: 99,
+      });
+    }
+
+    const upA = await upload(A.id, fx.officerA, 0x11);
+    const upB = await upload(B.id, fx.officerB, 0x22);
+    check('guild A uploaded an icon', upA.status === 200, 'HTTP ' + upA.status + ' ' + JSON.stringify(upA.body).slice(0, 90));
+    check('guild B uploaded an icon', upB.status === 200, 'HTTP ' + upB.status + ' ' + JSON.stringify(upB.body).slice(0, 90));
+
+    if (upA.body.image_url && upB.body.image_url) {
+      check('the two icons live at different URLs', upA.body.image_url !== upB.body.image_url,
+        upA.body.image_url === upB.body.image_url ? 'SAME PATH — one overwrites the other' : '');
+      check("guild A's path carries its guild id", upA.body.image_url.includes(A.id));
+      check("guild B's path carries its guild id", upB.body.image_url.includes(B.id));
+
+      // The real proof: fetch A's object and confirm B's upload didn't replace it.
+      const bytesA = Buffer.from(await (await fetch(upA.body.image_url)).arrayBuffer());
+      const bytesB = Buffer.from(await (await fetch(upB.body.image_url)).arrayBuffer());
+      check("guild A's icon still has guild A's bytes", bytesA.includes(0x11) && !bytesA.equals(bytesB),
+        bytesA.equals(bytesB) ? 'IDENTICAL — B overwrote A' : '');
+    }
 
     // ── 5. GLOBAL TABLES STAY SHARED ────────────────────────────────────────
     section('5. global tables are shared, not scoped');

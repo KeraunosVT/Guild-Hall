@@ -9,7 +9,11 @@
 //
 //   { id, username, avatar, verified_at, guilds: [ Membership, … ] }
 //   Membership = { guild_id, discord_guild_id, house, tag,
-//                  roles, permissions, fullAccess }
+//                  permissions, fullAccess }
+//
+// Discord role ids are NOT carried: they are consumed at login to resolve
+// `permissions` and nothing reads them afterwards, while they were the biggest
+// thing in the token. See issueSession() for why the size matters.
 //
 // Capabilities are then read for the ACTIVE guild only — applyGuildAccess()
 // below narrows req.user to one membership once guildContext has resolved which
@@ -289,12 +293,18 @@ async function evaluateMember(member, guild) {
     // another Discord server must never match here.
     : await perms.resolveFor({ guildId: guild.id, roleIds: roles, userId: u.id });
 
+  // Deliberately NOT storing `roles`. The Discord role snowflakes were the
+  // largest thing in this token — ~410 bytes per guild — and nothing read them:
+  // capabilities are resolved right here at login, so by the time a request runs
+  // the roles have already done their job. Carrying them took the cookie to 96%
+  // of the browser's 4 KB cap at four guilds, and a cookie over that cap is
+  // dropped SILENTLY: the member just bounces back to the login page forever
+  // with no error anywhere. Dropping them roughly doubles the headroom.
   return {
     guild_id: guild.id,
     discord_guild_id: String(guild.discord_guild_id),
     house: guild.house,
     tag: guild.tag,
-    roles,
     permissions: granted,
     fullAccess,
   };
@@ -403,12 +413,35 @@ function applyGuildAccess(user, guildId) {
   // the admin-area gate key off. NOT a capability check: anything finer must
   // test permissions, or a loot officer passes as an admin.
   user.isAdmin = !!(m && m.permissions.length > 0);
-  user.guildRoles = m ? m.roles : [];
   return m;
 }
 
+// Browsers cap a single cookie at ~4096 bytes INCLUDING its name and every
+// attribute, and a cookie over that is discarded without a word — no error, no
+// console warning, just a member who can never stay signed in. The people who
+// hit it first are officers in the most guilds, which is the worst possible
+// group to lose silently. Measure the whole header and complain early.
+const COOKIE_LIMIT = 4096;
+const COOKIE_WARN_AT = 3400;
+
 function issueSession(res, sessionUser) {
   const sessionToken = jwt.sign(sessionUser, JWT_SECRET, { expiresIn: `${SESSION_DAYS}d` });
+
+  // Approximates what Express will actually send: name, value, and attributes.
+  const headerBytes = COOKIE_NAME.length + 1 + sessionToken.length + 120;
+  if (headerBytes >= COOKIE_LIMIT) {
+    console.error(
+      `SESSION COOKIE TOO LARGE: ${headerBytes} bytes for user ${sessionUser.id} `
+      + `across ${(sessionUser.guilds || []).length} guild(s). The browser will DISCARD this `
+      + 'cookie and the member will not be able to sign in. Memberships must move server-side.',
+    );
+  } else if (headerBytes >= COOKIE_WARN_AT) {
+    console.warn(
+      `Session cookie is ${headerBytes} of ${COOKIE_LIMIT} bytes for user ${sessionUser.id} `
+      + `across ${(sessionUser.guilds || []).length} guild(s) — approaching the browser limit.`,
+    );
+  }
+
   res.cookie(COOKIE_NAME, sessionToken, { ...baseCookie, maxAge: SESSION_DAYS * 86400 * 1000 });
 }
 

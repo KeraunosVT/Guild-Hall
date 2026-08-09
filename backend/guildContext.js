@@ -76,7 +76,6 @@ module.exports = function createGuildContext(supabase, applyGuildAccess = () => 
     // session holds a list of memberships and no flat permissions array, so
     // every userHas() downstream is answering for the guild in front of it.
     applyGuildAccess(req.user, requested);
-    req.guildRoles = membership.roles;   // per-guild roles for permission checks
     return next();
   }
 
