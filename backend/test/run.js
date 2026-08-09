@@ -11,6 +11,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const SUITES = [
   ['leak audit (static)', 'leakAudit.js', false],
+  ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],
 ];

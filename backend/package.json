@@ -7,7 +7,8 @@
     "test": "node test/run.js",
     "test:audit": "node test/leakAudit.js",
     "test:isolation": "node test/apiIsolation.js",
-    "test:bot": "node test/botIsolation.js"
+    "test:bot": "node test/botIsolation.js",
+    "test:login": "node test/loginFlow.js"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",
