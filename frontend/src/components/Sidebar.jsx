@@ -3,6 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
+  Terminal, Heart,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -95,6 +96,28 @@ export default function Sidebar({ collapsed }) {
         {user && <NavSection title="Member" links={memberLinks} linkClass={linkClass} collapsed={collapsed} />}
         {adminNav.length > 0 && <NavSection title="Admin" links={adminNav} linkClass={linkClass} collapsed={collapsed} />}
       </nav>
+
+      {/* Both leave the single-page app: /commands is server-rendered (React
+          Router has no route for it, so a NavLink would render an empty shell)
+          and Ko-fi is off-site. Plain anchors, deliberately. */}
+      <div className={`border-t border-line px-2 py-2 flex ${collapsed ? 'flex-col items-center gap-1' : 'flex-col gap-0.5'}`}>
+        <a
+          href="/commands"
+          title={collapsed ? 'Bot commands' : undefined}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-ash hover:text-bone hover:bg-panel transition-colors"
+        >
+          <Terminal className="w-4 h-4 shrink-0" />
+          {!collapsed && <span className="truncate">Bot commands</span>}
+        </a>
+        <a
+          href="https://ko-fi.com/keraunosgg" target="_blank" rel="noopener noreferrer"
+          title={collapsed ? 'Support Guild Hall' : undefined}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-ash hover:text-brassbright hover:bg-panel transition-colors"
+        >
+          <Heart className="w-4 h-4 shrink-0" />
+          {!collapsed && <span className="truncate">Support Guild Hall</span>}
+        </a>
+      </div>
 
       {user && (
         <div className="border-t border-line p-3 flex items-center gap-2.5">
