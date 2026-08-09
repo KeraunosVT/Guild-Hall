@@ -13,6 +13,14 @@ function gateMessage() {
       return "That Discord account isn't in a server this hall serves. Membership is required to enter.";
     case 'forbidden':
       return 'Your account is in the server but lacks the rank required to enter the hall.';
+    // Split out of the old catch-all `error`, because the three have entirely
+    // different fixes and lumping them together told nobody anything.
+    case 'state':
+      return 'Your sign-in attempt expired or was interrupted. Please try again — '
+        + 'if it keeps happening, check that your browser is not blocking cookies for this site.';
+    case 'config':
+      return "Sign-in is misconfigured on our side and we've been told. "
+        + 'This is not something you can fix by retrying.';
     case 'error':
       return 'Sign-in could not be completed. Please try again.';
     default:

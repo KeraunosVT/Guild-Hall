@@ -128,11 +128,25 @@ router.get('/discord/callback', async (req, res) => {
   res.clearCookie(STATE_COOKIE, baseCookie);
 
   if (!code || !state || state !== savedState) {
-    return res.redirect(`${APP_URL}?auth=error`);
+    // Distinct from a failed exchange: the browser never sent back the state
+    // cookie we set at /login, or it didn't match. That is a cookie problem
+    // (blocked third-party cookies, a proxy dropping Set-Cookie, mismatched
+    // domains between APP_URL and the host actually serving the page), not a
+    // Discord problem — and diagnosing it as one wastes hours.
+    console.error('Auth callback: OAuth state mismatch.',
+      `code=${code ? 'present' : 'MISSING'}`,
+      `state=${state ? 'present' : 'MISSING'}`,
+      `cookie=${savedState ? 'present' : 'MISSING'}`,
+      savedState && state && savedState !== state ? '(both present but different)' : '');
+    return res.redirect(`${APP_URL}?auth=state`);
   }
 
   try {
-    // 1. Exchange the code for an access token
+    // 1. Exchange the code for an access token.
+    //
+    // validateStatus lets us read Discord's error body instead of axios
+    // throwing "Request failed with status code 401" and discarding the one
+    // piece of information that says what is actually wrong.
     const tokenRes = await axios.post(
       'https://discord.com/api/oauth2/token',
       new URLSearchParams({
@@ -142,8 +156,28 @@ router.get('/discord/callback', async (req, res) => {
         code: String(code),
         redirect_uri: DISCORD_REDIRECT_URI,
       }).toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        validateStatus: (s) => s < 500,
+      }
     );
+
+    if (tokenRes.status !== 200 || !tokenRes.data?.access_token) {
+      // Discord names the cause precisely here, and each one has a different fix:
+      //   invalid_client        -> DISCORD_CLIENT_SECRET is wrong, or belongs to
+      //                            a different application than DISCORD_CLIENT_ID
+      //   invalid_grant         -> the code was reused/expired, OR
+      //                            DISCORD_REDIRECT_URI does not byte-match the
+      //                            one registered in the Developer Portal
+      //   invalid_request       -> a required parameter is missing
+      console.error(
+        `Auth callback: token exchange failed (HTTP ${tokenRes.status}).`,
+        `discord=${JSON.stringify(tokenRes.data)}`,
+        `client_id=${DISCORD_CLIENT_ID}`,
+        `redirect_uri=${DISCORD_REDIRECT_URI}`,
+      );
+      return res.redirect(`${APP_URL}?auth=config`);
+    }
     const accessToken = tokenRes.data.access_token;
 
     // 2. Which guilds we host is this user actually in?
@@ -166,7 +200,14 @@ router.get('/discord/callback', async (req, res) => {
 
     res.redirect(APP_URL);
   } catch (err) {
-    console.error('Auth callback error:', err.message);
+    // Anything unexpected. Include the HTTP status and body when it came from
+    // an API call — err.message alone is "Request failed with status code 401",
+    // which names neither the endpoint nor the reason.
+    const status = err.response?.status;
+    const body = err.response?.data;
+    console.error('Auth callback error:', err.message,
+      status ? `status=${status}` : '',
+      body ? `body=${JSON.stringify(body).slice(0, 300)}` : '');
     res.redirect(`${APP_URL}?auth=error`);
   }
 });
@@ -283,7 +324,18 @@ async function discoverHostedGuilds(accessToken) {
     headers: { Authorization: `Bearer ${accessToken}` },
     validateStatus: (s) => s < 500,
   });
-  if (res.status !== 200) throw new Error(`guild list fetch failed: ${res.status}`);
+  if (res.status !== 200) {
+    // A 401/403 here almost always means the token lacks the `guilds` scope —
+    // i.e. the user authorised before that scope was requested and Discord
+    // reused the old grant. Re-consent fixes it; the scope string is logged so
+    // it can be compared against what the portal shows.
+    console.error(
+      `Auth callback: /users/@me/guilds failed (HTTP ${res.status}).`,
+      `discord=${JSON.stringify(res.data)}`,
+      'requested scope=identify guilds guilds.members.read',
+    );
+    throw new Error(`guild list fetch failed: ${res.status}`);
+  }
 
   return guildRegistry.resolveManyByDiscordIds(db, (res.data || []).map((g) => g.id));
 }
