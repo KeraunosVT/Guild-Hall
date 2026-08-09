@@ -4,6 +4,16 @@
 # Every secret is sync: false, so Render prompts you for the value instead of
 # ever reading it from the repo. See SETUP.md for where each value comes from.
 #
+# MULTI-TENANT: this deployment serves every registered guild from one URL and
+# one bot. Per-guild config — role ids, channel ids, timezone, guild-night
+# rollover, branding — lives on that guild's row in the `guilds` table, NOT
+# here. There are deliberately no DISCORD_GUILD_ID / *_ROLE_IDS / *_CHANNEL_ID
+# variables: as env they applied one guild's settings to every tenant, which
+# meant one house's officers holding powers in another and one house's LOA
+# posts landing in another's channel. backend/test/leakAudit.js fails the build
+# if any of them is read again. Register a guild with
+# `node backend/scripts/onboardGuild.js`.
+#
 # Note: the free plan sleeps when idle, which also disconnects the Discord bot
 # (slash commands and voice snapshots stop until the next web request wakes it).
 # For an always-on bot, use "starter" or above.
@@ -25,22 +35,13 @@ services:
         sync: false
       - key: DISCORD_REDIRECT_URI
         sync: false # https://<this-service>.onrender.com/api/auth/discord/callback
-      - key: DISCORD_GUILD_ID
-        sync: false
+      # One bot serves every guild; which server it is acting on comes from the
+      # interaction, not from env.
       - key: DISCORD_BOT_TOKEN
         sync: false
-      - key: DISCORD_ALLOWED_ROLE_IDS
-        sync: false
-      - key: DISCORD_ADMIN_ROLE_IDS
-        sync: false
-      - key: DISCORD_MEMBER_ROLE_IDS
-        sync: false
-      - key: DISCORD_ROSTER_CHANNEL_ID
-        sync: false
-      - key: DISCORD_LOA_CHANNEL_ID
-        sync: false
-      - key: DISCORD_ANNOUNCE_CHANNEL_ID
-        sync: false
+      # SINGLE_GUILD_ID is intentionally absent. Setting it pins the entire
+      # deployment to one tenant (single-guild self-host mode) and every other
+      # registered guild becomes unreachable from the web app.
       - key: JWT_SECRET
         generateValue: true # Render generates a strong random value
       - key: APP_URL
