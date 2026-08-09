@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>Discord commands — Guild Hall</title>
+  <meta name="description" content="Every slash command the Guild Hall bot answers: leave of absence, elite boss timers, attendance snapshots, and timed announcements." />
+  <meta property="og:title" content="Guild Hall — Discord commands" />
+  <meta property="og:description" content="Every slash command the Guild Hall bot answers, what each option does, and who can run it." />
+  <meta property="og:type" content="article" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* Same tokens as landing.html so this reads as one site, plus a mono face
+       and two derived surfaces this page needs. A command reference is about
+       typed syntax, so mono does the display work here rather than Sora. */
+    :root {
+      --ink: rgb(18 18 20);
+      --panel: rgb(27 27 30);
+      --panelup: rgb(35 35 38);
+      --line: rgb(44 44 48);
+      --brass: rgb(214 69 69);
+      --brassbright: rgb(255 107 95);
+      --oxblooddeep: rgb(58 27 24);
+      --bone: rgb(236 236 235);
+      --ash: rgb(138 138 141);
+      --gold: rgb(216 171 94);          /* officer marker — a category, not emphasis */
+      --golddeep: rgb(43 33 21);
+      --font-display: 'Sora', system-ui, sans-serif;
+      --font-body: 'Inter', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--ink);
+      color: var(--bone);
+      font-family: var(--font-body);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    body::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(900px 500px at 50% -10%, rgba(214,69,69,0.10), transparent 70%),
+        radial-gradient(600px 400px at 100% 100%, rgba(214,69,69,0.05), transparent 70%);
+    }
+    header, main, footer { position: relative; z-index: 1; }
+
+    /* nav — same shape as the landing page */
+    nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .nav-links { display: flex; gap: 12px; align-items: center; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-radius: 10px;
+      font-family: var(--font-display); font-weight: 600; font-size: 14px;
+      border: 1px solid var(--line); color: var(--bone);
+      transition: border-color .15s ease, color .15s ease, background .15s ease;
+    }
+    .btn:hover { border-color: var(--brass); color: var(--brassbright); }
+    .btn-primary { background: var(--brass); border-color: var(--brass); color: #fff; }
+    .btn-primary:hover { background: var(--brassbright); border-color: var(--brassbright); color: #fff; }
+
+    /* masthead */
+    .masthead { padding: 48px 0 40px; display: flex; flex-direction: column; gap: 16px; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em;
+      text-transform: uppercase; color: var(--brass);
+    }
+    h1 {
+      font-family: var(--font-mono); font-weight: 600;
+      font-size: clamp(30px, 5vw, 46px); line-height: 1.08; letter-spacing: -.02em;
+      text-wrap: balance;
+    }
+    h1 .slash { color: var(--brass); }
+    .standfirst { max-width: 62ch; color: var(--ash); font-size: 17px; }
+
+    /* shared surfaces */
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .panel-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+      padding: 14px 18px; border-bottom: 1px solid var(--line);
+      font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em;
+      text-transform: uppercase; color: var(--ash);
+    }
+    .scroller { overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+    th, td { text-align: left; padding: 11px 18px; vertical-align: top; }
+    thead th {
+      font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+      text-transform: uppercase; color: var(--ash); font-weight: 500;
+      border-bottom: 1px solid var(--line); white-space: nowrap;
+    }
+    tbody tr + tr td { border-top: 1px solid var(--line); }
+    tbody td:first-child { white-space: nowrap; }
+    code { font-family: var(--font-mono); font-size: .9em; color: var(--bone); }
+    .opt { color: var(--ash); }
+    .req { color: var(--brassbright); font-weight: 600; }
+    .tnum { font-variant-numeric: tabular-nums; }
+
+    /* access chips */
+    .chip {
+      display: inline-block; font-family: var(--font-mono);
+      font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+      padding: 4px 8px; border-radius: 4px; white-space: nowrap;
+    }
+    .chip-all { background: var(--oxblooddeep); color: var(--brassbright); }
+    .chip-officer { background: var(--golddeep); color: var(--gold); }
+
+    /* sections */
+    main { padding-bottom: 72px; display: flex; flex-direction: column; gap: 56px; }
+    section { display: flex; flex-direction: column; gap: 20px; }
+    h2 {
+      font-family: var(--font-mono); font-size: 12px; letter-spacing: .18em;
+      text-transform: uppercase; font-weight: 600; color: var(--bone);
+      padding-bottom: 10px; border-bottom: 2px solid var(--brass);
+    }
+    h2 .qualifier { color: var(--ash); font-weight: 400; }
+
+    .entry {
+      background: var(--panel); border: 1px solid var(--line);
+      border-left: 3px solid var(--brass); border-radius: 12px;
+      display: flex; flex-direction: column;
+    }
+    .entry.officers { border-left-color: var(--gold); }
+    .entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 18px 20px 6px; }
+    .signature { font-family: var(--font-mono); font-weight: 600; font-size: 17px; }
+    .signature .slash { color: var(--brass); }
+    .entry-body { padding: 0 20px 20px; display: flex; flex-direction: column; gap: 14px; }
+    .entry-body > p { max-width: 68ch; color: var(--ash); }
+
+    .usage {
+      font-family: var(--font-mono); font-size: 13px;
+      background: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+      padding: 11px 13px; overflow-x: auto; white-space: pre; color: var(--bone);
+    }
+    .args { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .args thead th { background: var(--panelup); }
+    .args tbody td:first-child { font-family: var(--font-mono); }
+
+    .aside {
+      display: flex; gap: 10px; font-size: 14px; color: var(--ash);
+      border-top: 1px dashed var(--line); padding-top: 13px;
+    }
+    .aside .marker {
+      font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--gold); white-space: nowrap; padding-top: 2px;
+    }
+
+    /* notes */
+    .notes {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1px; background: var(--line); border: 1px solid var(--line);
+      border-radius: 12px; overflow: hidden;
+    }
+    .note { background: var(--panel); padding: 18px 20px; display: flex; flex-direction: column; gap: 7px; }
+    .note h3 {
+      font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+      text-transform: uppercase; color: var(--brass); font-weight: 600;
+    }
+    .note p { font-size: 14px; color: var(--ash); }
+
+    footer { border-top: 1px solid var(--line); padding: 28px 0 40px; }
+    .foot-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 16px; color: var(--ash); font-size: 14px;
+    }
+    .foot-links { display: flex; gap: 20px; }
+    .foot-links a:hover { color: var(--brassbright); }
+    .disclaimer { text-align: center; color: var(--ash); font-size: 12.5px; margin-top: 14px; opacity: .8; }
+
+    a:focus-visible, .btn:focus-visible { outline: 2px solid var(--brassbright); outline-offset: 3px; border-radius: 4px; }
+
+    @media (max-width: 640px) {
+      .masthead { padding: 32px 0 28px; }
+      main { gap: 40px; }
+      th, td { padding: 10px 14px; }
+      .foot-inner { flex-direction: column; text-align: center; }
+      .nav-links .btn.hide-sm { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="wrap">
+    <nav>
+      <a class="brand" href="/landing" aria-label="Guild Hall home">
+        <svg viewBox="0 0 420 90" font-family="Sora, sans-serif" role="img" aria-label="Guild Hall"
+             style="height:44px;width:auto;display:block;">
+          <defs><linearGradient id="gh-nav-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#d64545"/><stop offset="1" stop-color="#3a1b18"/>
+          </linearGradient></defs>
+          <rect x="9" y="12" width="66" height="66" rx="16" fill="url(#gh-nav-grad)"/>
+          <g transform="translate(21 24) scale(0.42)" fill="#ffffff"><path d="M50 6 A44 44 0 1 0 94 50 L94 46 L60 46 L60 60 L78 60 A28.5 28.5 0 1 1 50 21.5 A28.3 28.3 0 0 1 69 28.8 L79.5 18.3 A43.8 43.8 0 0 0 50 6 Z"/><rect x="38" y="34" width="8.5" height="33" rx="2.2"/><rect x="55" y="34" width="8.5" height="33" rx="2.2"/><rect x="38" y="46" width="25.5" height="8" rx="2.2"/></g>
+          <text x="92" y="59" font-size="38" font-weight="800" letter-spacing="-0.02em"><tspan fill="#ececeb">Guild</tspan><tspan fill="#d64545">Hall</tspan></text>
+        </svg>
+      </a>
+      <div class="nav-links">
+        <a href="/landing" class="btn hide-sm">What it does</a>
+        <a href="/api/auth/login" class="btn btn-primary">Member login</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="wrap">
+
+    <div class="masthead">
+      <div class="eyebrow">Discord bot</div>
+      <h1><span class="slash">/</span>command reference</h1>
+      <p class="standfirst">
+        Five commands — eight forms once you count the LOA variants — run from any channel in your
+        guild's Discord server. Times are read in your guild's own timezone, and everything you file
+        lands in your guild's records only: the bot serves several houses and never mixes them.
+      </p>
+    </div>
+
+    <!-- Whole surface area on one screen, for people who know the commands and
+         just need the argument order. -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>At a glance</span>
+        <span><span class="req">Highlighted</span> = required</span>
+      </div>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Command</th><th>Does</th><th>Who</th></tr></thead>
+          <tbody>
+            <tr><td><code>/elitetimer</code></td><td>Report a boss kill, start its respawn clock</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/elitetimers</code></td><td>Show every boss's respawn status</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/loa event</code></td><td>Out for one date, or from a time onward</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/loa range</code></td><td>Out across a span of dates</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/loa recurring</code></td><td>Out the same weekday every week</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/loa cancel</code></td><td>Withdraw an LOA you filed</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/attendance</code></td><td>Snapshot a voice channel into an event's attendance</td><td><span class="chip chip-officer">Officers</span></td></tr>
+            <tr><td><code>/announce</code></td><td>Post a countdown announcement with a live timestamp</td><td><span class="chip chip-officer">Officers</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <section>
+      <h2>Anyone in the guild <span class="qualifier">— 6 forms</span></h2>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>elitetimer</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>Records that a world boss died and works out when it comes back. Your confirmation is
+            private; the timer itself is posted to the channel so everyone sees it.</p>
+          <div class="usage">/elitetimer location:<span class="req">Laslan</span> time:<span class="req">6:40pm</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>location</code></td><td><span class="req">required</span></td><td>Pick from the list — Laslan, Stoneguard, Talandre, their Abyss variants, and Nyx.</td></tr>
+                <tr><td><code>time</code></td><td><span class="req">required</span></td><td>When it died, today, in guild time. <code>6:40pm</code>, <code>640pm</code> and <code>1840</code> all work.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="aside">
+            <span class="marker">Respawn</span>
+            <span>Laslan and Stoneguard return after <strong class="tnum">4 hours</strong>; Talandre and Nyx after
+              <strong class="tnum">6</strong>. Abyss variants match their surface counterpart. Reporting the same
+              location twice replaces the earlier timer rather than adding a second.</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>elitetimers</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>Lists every boss with its next spawn as a live countdown. No options. The reply is public,
+            so it doubles as a way to put the current state in front of the whole channel.</p>
+          <div class="usage">/elitetimers</div>
+        </div>
+      </article>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>loa event</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>Miss one night. Name a specific event, or leave the event blank and give a start time to
+            mean "out from then on" — useful when you'll be late rather than absent.</p>
+          <div class="usage">/loa event date:<span class="req">2026-08-14</span> reason:<span class="req">work</span> <span class="opt">event:Siege start_time:9:00 PM</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>date</code></td><td><span class="req">required</span></td><td class="tnum">The night you're out, as <code>YYYY-MM-DD</code>.</td></tr>
+                <tr><td><code>reason</code></td><td><span class="req">required</span></td><td>Seen by officers only, never by other members.</td></tr>
+                <tr><td><code>event</code></td><td><span class="opt">optional</span></td><td>Starts suggesting as you type. Leave blank to mean the whole night.</td></tr>
+                <tr><td><code>start_time</code></td><td><span class="opt">optional</span></td><td>Absent from this time onward. Blank means just the event you picked.</td></tr>
+                <tr><td><code>end_time</code></td><td><span class="opt">optional</span></td><td>Back after this. Blank means out for the rest of the night.</td></tr>
+                <tr><td><code>member</code></td><td><span class="opt">officers</span></td><td>File on someone else's behalf. Refused if you aren't an officer.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>loa range</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>A holiday, a work trip, anything spanning several days. Both ends are inclusive.</p>
+          <div class="usage">/loa range start_date:<span class="req">2026-08-14</span> end_date:<span class="req">2026-08-21</span> reason:<span class="req">holiday</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>start_date</code></td><td><span class="req">required</span></td><td class="tnum">First night out, <code>YYYY-MM-DD</code>.</td></tr>
+                <tr><td><code>end_date</code></td><td><span class="req">required</span></td><td class="tnum">Last night out, inclusive.</td></tr>
+                <tr><td><code>reason</code></td><td><span class="req">required</span></td><td>Officers only.</td></tr>
+                <tr><td><code>member</code></td><td><span class="opt">officers</span></td><td>File on someone else's behalf.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>loa recurring</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>A standing conflict — a class, a shift, a weekly commitment. Applies every week until you
+            cancel it, so you file it once rather than every Tuesday.</p>
+          <div class="usage">/loa recurring day:<span class="req">Tuesday</span> reason:<span class="req">class</span> <span class="opt">start_time:8:00 PM</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>day</code></td><td><span class="req">required</span></td><td>Pick a weekday from the list.</td></tr>
+                <tr><td><code>reason</code></td><td><span class="req">required</span></td><td>Officers only.</td></tr>
+                <tr><td><code>event</code></td><td><span class="opt">optional</span></td><td>Blank means the whole night, every week.</td></tr>
+                <tr><td><code>start_time</code></td><td><span class="opt">optional</span></td><td>Out from this time onward.</td></tr>
+                <tr><td><code>end_time</code></td><td><span class="opt">optional</span></td><td>Back after this.</td></tr>
+                <tr><td><code>member</code></td><td><span class="opt">officers</span></td><td>File on someone else's behalf.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>loa cancel</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>Plans changed. Start typing and your upcoming LOAs appear — pick one and it's withdrawn,
+            along with the notice that was posted when you filed it.</p>
+          <div class="usage">/loa cancel entry:<span class="req">Event — 2026-08-14</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>entry</code></td><td><span class="req">required</span></td><td>Suggests your own upcoming LOAs. Officers see everyone's.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="aside">
+            <span class="marker">Scope</span>
+            <span>Members can only cancel what they filed. Officers can cancel anyone's — the same rule
+              the LOA board on the website follows.</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section>
+      <h2>Officers only <span class="qualifier">— 2 forms</span></h2>
+
+      <article class="entry officers">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>attendance</span>
+          <span class="chip chip-officer">Officers</span>
+        </div>
+        <div class="entry-body">
+          <p>Takes a snapshot of who is sitting in a voice channel right now and records it as
+            attendance for a scheduled event. Everyone captured gets a DM confirming it, so there's no
+            argument later about whether they were counted.</p>
+          <div class="usage">/attendance event:<span class="req">Siege</span> <span class="opt">channel:#raid-1 date:2026-08-14</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>event</code></td><td><span class="req">required</span></td><td>Which scheduled event this counts toward. Suggests as you type.</td></tr>
+                <tr><td><code>channel</code></td><td><span class="opt">optional</span></td><td>Defaults to the voice channel you're in. Name one to snap a different room.</td></tr>
+                <tr><td><code>date</code></td><td><span class="opt">optional</span></td><td class="tnum">Defaults to tonight. Use <code>YYYY-MM-DD</code> to backfill.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="aside">
+            <span class="marker">Timing</span>
+            <span>It captures the moment you run it, not the whole night — run it once the group has
+              actually assembled.</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="entry officers">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>announce</span>
+          <span class="chip chip-officer">Officers</span>
+        </div>
+        <div class="entry-body">
+          <p>Posts to the announcements channel with a Discord timestamp, so every member sees the time
+            in their own zone and a live countdown beside it. No more "9:30 my time or yours".</p>
+          <div class="usage">/announce time:<span class="req">9:30pm</span> <span class="opt">message:roll call {time} in CTA comms role:@Members</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>time</code></td><td><span class="req">required</span></td><td>Today, in guild time. <code>9:30pm</code>, <code>930pm</code>, <code>2130</code>.</td></tr>
+                <tr><td><code>message</code></td><td><span class="opt">optional</span></td><td>Put <code>{time}</code> where the timestamp should sit. Without it, the time is appended.</td></tr>
+                <tr><td><code>role</code></td><td><span class="opt">optional</span></td><td>Pings this role. Leave blank for a quiet post.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section>
+      <h2>Things that apply everywhere</h2>
+      <div class="notes">
+        <div class="note">
+          <h3>Replies are private</h3>
+          <p>Everything answers only to you, except <code>/elitetimers</code> and the spawn timer posted
+            after a kill report. Your LOA reason is never shown in channel.</p>
+        </div>
+        <div class="note">
+          <h3>Times are guild time</h3>
+          <p>Every time you type is read in the guild's configured timezone, not your own and not the
+            server's. Officers set that once.</p>
+        </div>
+        <div class="note">
+          <h3>The night rolls over after midnight</h3>
+          <p>A 12:30&nbsp;AM boss belongs to the night before, not to a new day. Schedules and LOA both
+            follow that boundary, so late events stay attached to the right night.</p>
+        </div>
+        <div class="note">
+          <h3>Officer means your guild's role</h3>
+          <p>Each guild names its own officer role. If a command answers <em>Officers only</em>, you
+            don't hold it — ask whoever runs your roster.</p>
+        </div>
+        <div class="note">
+          <h3>New server? Give it an hour</h3>
+          <p>Commands are registered across every server the bot serves, and Discord can take up to an
+            hour to show them after it joins. Nothing is broken in the meantime.</p>
+        </div>
+        <div class="note">
+          <h3>Unregistered servers get nothing</h3>
+          <p>If the bot is in a server that isn't set up in Guild Hall, every command politely refuses
+            rather than writing to some other guild's records.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <div>© <span id="year"></span> Guild Hall</div>
+      <div class="foot-links">
+        <a href="/landing">Home</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/api/auth/login">Member login</a>
+      </div>
+    </div>
+    <div class="wrap disclaimer">
+      Guild Hall is an independent, fan-made tool. Not affiliated with or endorsed by any game publisher or Discord.
+    </div>
+  </footer>
+
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>
