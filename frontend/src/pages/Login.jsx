@@ -1,12 +1,16 @@
 import { useAuth } from '../auth';
 import Sigil from '../components/Sigil';
-import { GUILD } from '../guild';
 
-function gateMessage(house) {
+// The login page is the one screen that cannot know which guild it belongs to:
+// it renders before there is a session, and the session is what says which
+// guilds you are in. So it wears the product's own name rather than any house's
+// — and it must, on a deployment serving several, since guessing would show one
+// guild's banner to another guild's members.
+function gateMessage() {
   const params = new URLSearchParams(window.location.search);
   switch (params.get('auth')) {
     case 'not_member':
-      return `That Discord account isn't in the ${house} server. Membership is required to enter.`;
+      return "That Discord account isn't in a server this hall serves. Membership is required to enter.";
     case 'forbidden':
       return 'Your account is in the server but lacks the rank required to enter the hall.';
     case 'error':
@@ -18,7 +22,7 @@ function gateMessage(house) {
 
 export default function Login() {
   const { login } = useAuth();
-  const message = gateMessage(GUILD.house);
+  const message = gateMessage();
 
   return (
     <div className="min-h-screen bg-ink text-bone flex flex-col items-center justify-center px-6 text-center">
@@ -28,16 +32,14 @@ export default function Login() {
 
       <div className="rise rise-1 eyebrow text-brass text-[11px] mt-8 mb-4">The gate is barred</div>
       <h1 className="rise rise-1 font-display font-bold text-bone text-4xl md:text-5xl tracking-[0.08em]">
-        {GUILD.house}
+        Guild Hall
       </h1>
       <p className="rise rise-2 font-display text-brassbright text-lg md:text-xl tracking-[0.12em] mt-6">
-        {GUILD.motto}
+        Muster the house.
       </p>
-      <p className="rise rise-2 max-w-xl text-ash mt-5 leading-relaxed">
-        {GUILD.creed}
-      </p>
-      <p className="rise rise-2 text-ash max-w-md mt-5 leading-relaxed">
-        This hall is open to the house alone. Sign in with Discord to prove your standing.
+      <p className="rise rise-2 text-ash max-w-md mt-7 leading-relaxed">
+        Sign in with Discord to prove your standing. You'll be taken to the halls
+        of whichever houses you belong to.
       </p>
 
       {message && (
@@ -62,16 +64,10 @@ export default function Login() {
           </button>
           <span className="text-xs text-ash/70">(Members Only)</span>
         </div>
-        <a
-          href="https://discord.gg/houseregard" target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 px-7 py-3.5 rounded-lg font-semibold tracking-wide bg-brass hover:bg-brassbright text-ink transition-colors"
-        >
-          Apply Here
-        </a>
       </div>
 
       <div className="rise rise-3 mt-10 font-display text-[10px] tracking-[0.25em] text-ash">
-        {GUILD.house.toUpperCase()}
+        GUILD HALL
       </div>
 
       <div className="mt-6 flex gap-5 text-xs text-ash/70">

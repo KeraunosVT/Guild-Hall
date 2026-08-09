@@ -27,6 +27,10 @@ const cache = new Map(); // discord_guild_id -> { row, at }
 // shipping secrets into logs.
 const COLUMNS = [
   'id', 'discord_guild_id', 'house', 'tag', 'aliases', 'timezone', 'day_start',
+  // Branding, served to the browser by GET /api/guild. Omitting these made that
+  // endpoint return null for every guild's motto and creed — the values were on
+  // the row, just never selected.
+  'motto', 'creed',
   'admin_role_ids', 'allowed_role_ids', 'member_role_ids',
   'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'status',
 ].join(', ');

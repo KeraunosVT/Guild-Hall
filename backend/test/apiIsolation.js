@@ -234,6 +234,23 @@ const section = (t) => console.log('\n' + t);
     check('players cache did not serve A to B', !pB.includes(A_MARK), pB.slice(0, 110));
     check('players cache did not serve B to A', !pA.includes(B_MARK), pA.slice(0, 110));
 
+    // ── 4c. PER-GUILD IDENTITY AND TIME RULES ───────────────────────────────
+    // The frontend used to compile the house name and the guild-night rollover
+    // into the bundle. It now asks GET /api/guild, so that endpoint has to
+    // answer per guild — and must not hand the browser role ids, channel ids
+    // or billing state, which live on the same row.
+    section('4c. GET /api/guild is per guild and reveals nothing else');
+    const cfgA = await (await call('/api/guild')).json();
+    const cfgB = await (await call('/api/guild', { guild: B.id })).json();
+    check('house differs per guild', cfgA.guild.house !== cfgB.guild.house,
+      `${cfgA.guild.house} vs ${cfgB.guild.house}`);
+    check('timezone differs per guild', cfgA.guild.timezone !== cfgB.guild.timezone,
+      `${cfgA.guild.timezone} vs ${cfgB.guild.timezone}`);
+    const exposed = Object.keys(cfgA.guild).filter((k) => /role|channel|subscription|status|discord_guild/.test(k));
+    check('no role / channel / billing fields exposed', !exposed.length, exposed.join(', '));
+    const outsiderCfg = await call('/api/guild', { token: fx.officerB, guild: A.id });
+    check('non-member refused their own guild config', outsiderCfg.status === 403, 'HTTP ' + outsiderCfg.status);
+
     // ── 5. GLOBAL TABLES STAY SHARED ────────────────────────────────────────
     section('5. global tables are shared, not scoped');
     r = await call('/api/admin/market-potentials');

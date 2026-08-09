@@ -10,37 +10,31 @@
 // shared deployment would have served one guild's member list to another, and
 // posted every guild's roster into the first guild's channel.
 //
-// Config resolution is: the guilds row first, then the env var. The env
-// fallback is what keeps an existing single-guild deployment working before its
-// row is filled in — it is not a default for new tenants, which must set their
-// own or get nothing.
+// Config comes from the guilds row and nowhere else. There used to be an env
+// fallback for the original single-guild deployment; it is gone, because on a
+// shared deployment it silently gave one tenant another tenant's channels and
+// roles. A row missing a field is a configuration error, and every function
+// here says so rather than quietly acting on somebody else's server.
 const axios = require('axios');
 
 const API = 'https://discord.com/api/v10';
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const ENV_GUILD_ID = process.env.DISCORD_GUILD_ID;
-const ENV_ROSTER_CHANNEL_ID = process.env.DISCORD_ROSTER_CHANNEL_ID;
-const ENV_MEMBER_ROLES = (process.env.DISCORD_MEMBER_ROLE_IDS || process.env.DISCORD_ALLOWED_ROLE_IDS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
-
 // The token is the only process-wide requirement now — which guild to act on
 // arrives with each call. (One bot, many servers: Model A in the plan.)
 const botConfigured = Boolean(BOT_TOKEN);
 
 const authHeaders = () => ({ Authorization: `Bot ${BOT_TOKEN}` });
 
-// ── Per-guild config, row first then env ────────────────────────────────────
-const guildIdOf = (guild) => String((guild && guild.discord_guild_id) || ENV_GUILD_ID || '');
-const rosterChannelOf = (guild) => (guild && guild.roster_channel_id) || ENV_ROSTER_CHANNEL_ID;
-const memberRolesOf = (guild) => {
-  const list = Array.isArray(guild && guild.member_role_ids)
-    ? guild.member_role_ids.map(String).filter(Boolean) : [];
-  return list.length ? list : ENV_MEMBER_ROLES;
-};
+// ── Per-guild config, from the row only ─────────────────────────────────────
+const guildIdOf = (guild) => String((guild && guild.discord_guild_id) || '');
+const rosterChannelOf = (guild) => (guild && guild.roster_channel_id) || '';
+const memberRolesOf = (guild) => (Array.isArray(guild && guild.member_role_ids)
+  ? guild.member_role_ids.map(String).filter(Boolean) : []);
 
-// Resolve the guild id or refuse. Returning a default guild here would be the
-// worst possible failure: it wouldn't error, it would quietly act on the wrong
-// server — post another guild's roster, or hand back its member list.
+// Resolve the guild id or refuse. Falling back to a configured default here
+// would be the worst possible failure: it wouldn't error, it would quietly act
+// on the wrong server — post one guild's roster into another's channel, or hand
+// back another guild's member list.
 function requireGuildId(guild, fn) {
   if (!botConfigured) throw new Error('Discord bot is not configured (set DISCORD_BOT_TOKEN).');
   const id = guildIdOf(guild);
@@ -128,8 +122,9 @@ async function fetchAllMembers(guildId, memberRoles) {
 // Returns { status, member } — 404 means they're no longer in the guild.
 //
 // Takes a raw Discord server id rather than the row: re-verification walks the
-// memberships in a session, which already carry the id.
-async function fetchMember(userId, discordGuildId = ENV_GUILD_ID) {
+// memberships in a session, which already carry the id. No default — verifying a
+// member against an unspecified guild is meaningless.
+async function fetchMember(userId, discordGuildId) {
   if (!botConfigured) throw new Error('Discord bot is not configured.');
   if (!discordGuildId) throw new Error('fetchMember: no guild id.');
   const res = await axios.get(`${API}/guilds/${discordGuildId}/members/${userId}`, {

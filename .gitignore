@@ -7,6 +7,9 @@
 .env
 .env.local
 .env.*.local
+# Any backup/variant too — a .env.bak still holds every secret the real one does.
+.env.*
+!.env.example
 
 # Logs
 logs

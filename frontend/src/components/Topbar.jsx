@@ -4,7 +4,7 @@ import { Moon, Sun, Check, PanelLeft, ChevronRight } from 'lucide-react';
 import { guildLinks, memberLinks, adminLinks } from './Sidebar';
 import { applyTheme } from '../theme';
 import { applyPalette, PALETTES } from '../palette';
-import { GUILD } from '../guild';
+import { useGuild } from '../guild';
 
 const ALL_LINKS = [...guildLinks, ...memberLinks, ...adminLinks];
 
@@ -15,7 +15,7 @@ const ALL_LINKS = [...guildLinks, ...memberLinks, ...adminLinks];
 // scan of ALL_LINKS never sees: every one of them missed and fell through to the
 // fallback, so they all read the same. Matching children as well both fixes that
 // and gives them the group as a parent crumb.
-function trailFor(pathname) {
+function trailFor(pathname, house) {
   for (const link of ALL_LINKS) {
     if (link.to === pathname) return [{ label: link.label }];
     const child = (link.children || []).find((c) => c.to === pathname);
@@ -30,7 +30,7 @@ function trailFor(pathname) {
   if (pathname === '/me') return [{ label: 'My Profile' }];
   // Legacy aliases kept in App.jsx so old links still resolve.
   if (pathname === '/dashboard' || pathname === '/match-stats') return [{ label: 'War Record', to: '/war-record' }];
-  return [{ label: GUILD.house }];
+  return [{ label: house }];
 }
 
 const PALETTE_META = {
@@ -41,6 +41,7 @@ const PALETTE_META = {
 
 export default function Topbar({ collapsed, onToggleSidebar }) {
   const { pathname } = useLocation();
+  const { house, guilds, activeGuildId, switchGuild } = useGuild();
   const isHome = pathname === '/';
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'dark');
   const [palette, setPalette] = useState(() => document.documentElement.dataset.palette || 'dispatch');
@@ -81,7 +82,7 @@ export default function Topbar({ collapsed, onToggleSidebar }) {
           <NavLink to="/" className={`shrink-0 transition-colors ${isHome ? 'text-bone font-semibold' : 'text-ash hover:text-bone'}`}>
             Dashboard
           </NavLink>
-          {!isHome && trailFor(pathname).map((crumb, i, all) => (
+          {!isHome && trailFor(pathname, house).map((crumb, i, all) => (
             <span key={crumb.label} className="flex items-center gap-1.5 min-w-0">
               <ChevronRight className="w-3.5 h-3.5 text-ash/50 shrink-0" />
               {/* Only the last crumb is the current page; the rest navigate. */}
@@ -95,6 +96,26 @@ export default function Topbar({ collapsed, onToggleSidebar }) {
             </span>
           ))}
         </nav>
+
+        {/* Guild switcher — only when there is something to switch between.
+            A member of one house should never be asked to pick it. */}
+        {guilds.length > 1 && (
+          <>
+            <div className="w-px h-5 bg-line shrink-0" />
+            <select
+              value={activeGuildId || ''}
+              onChange={(e) => switchGuild(e.target.value)}
+              aria-label="Active guild"
+              className="shrink-0 bg-transparent border border-line rounded px-2 py-1 text-xs text-ash hover:text-bone focus:text-bone focus:outline-none focus:border-brass transition-colors"
+            >
+              {guilds.map((g) => (
+                <option key={g.guild_id} value={g.guild_id} className="bg-ink text-bone">
+                  {g.house}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
       </div>
 
       <div ref={ref} className="relative">

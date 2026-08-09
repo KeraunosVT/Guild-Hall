@@ -1344,8 +1344,9 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
   // ── Permissions: capabilities granted to Discord roles and to individuals ───
   // Gated on the 'permissions' capability itself. There's no lockout risk: a role
-  // in DISCORD_ADMIN_ROLE_IDS always holds every capability and can't be edited
-  // from here, so someone can always get back in even if every grant is deleted.
+  // in the guild's own admin_role_ids always holds every capability and can't be
+  // edited from here, so someone can always get back in even if every grant is
+  // deleted.
   router.get('/permissions', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     // Roles and members come from Discord so the grid can show live names, but a

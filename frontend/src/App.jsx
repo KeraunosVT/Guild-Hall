@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
+import { GuildProvider, useGuild } from './guild';
 import Sidebar, { SIDEBAR_COLLAPSE_KEY, getInitialSidebarCollapsed } from './components/Sidebar';
 import Topbar from './components/Topbar';
 import EliteTimerBar from './components/EliteTimerBar';
@@ -54,13 +55,49 @@ function Layout() {
   );
 }
 
-function Splash() {
+function Splash({ label = 'Verifying standing…' }) {
   return (
     <div className="min-h-screen bg-ink flex flex-col items-center justify-center gap-5">
       <Sigil className="w-12 h-16 text-brass rise" />
-      <div className="eyebrow text-[10px] text-ash">Verifying standing…</div>
+      <div className="eyebrow text-[10px] text-ash">{label}</div>
     </div>
   );
+}
+
+// Nothing renders until the active guild's identity and time rules have landed.
+// This is not politeness: daySlot(), todayInGuildTz() and the schedule views
+// read the guild-night rollover live, so a page painted before configuration
+// would show the fallback rollover and quietly place events on the wrong night.
+function GuildGate({ children }) {
+  const { loading, error, guild, needsReauth } = useGuild();
+  const { login } = useAuth();
+
+  if (loading) return <Splash label="Entering the hall…" />;
+  if (error || !guild) {
+    return (
+      <div className="min-h-screen bg-ink text-bone flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <Sigil className="w-12 h-16 text-brass" />
+        <div className="font-display tracking-[0.12em]">
+          {needsReauth ? 'Your session is out of date' : (error || 'No guild available.')}
+        </div>
+        <p className="text-ash text-sm max-w-sm">
+          {needsReauth
+            ? 'Sessions now carry which houses you belong to. Sign in again to continue — nothing has been lost.'
+            : 'Your account may not belong to a house this hall serves yet.'}
+        </p>
+        {needsReauth && (
+          <button
+            onClick={login}
+            className="mt-2 px-6 py-3 rounded-lg font-semibold tracking-wide text-white transition-colors"
+            style={{ backgroundColor: '#5865F2' }}
+          >
+            Sign in again
+          </button>
+        )}
+      </div>
+    );
+  }
+  return children;
 }
 
 // Full login wall: nothing past the gate renders without a valid session.
@@ -70,6 +107,7 @@ function Gate() {
   if (!user) return <Login />;
 
   return (
+    <GuildGate>
     <Router>
       <Routes>
         <Route element={<Layout />}>
@@ -101,13 +139,16 @@ function Gate() {
         </Route>
       </Routes>
     </Router>
+    </GuildGate>
   );
 }
 
 function App() {
   return (
     <AuthProvider>
-      <Gate />
+      <GuildProvider>
+        <Gate />
+      </GuildProvider>
     </AuthProvider>
   );
 }

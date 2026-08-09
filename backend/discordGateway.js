@@ -10,24 +10,17 @@ const guildRegistry = require('./guildRegistry');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-// Env values are the FALLBACK for a single-guild self-host whose guilds row
-// hasn't been filled in. Each tenant's real config lives on its row, read off
-// interaction.guildHall — one bot serves many servers, so nothing here may be
-// decided once at import time (plan tasks 8 and 9).
-const ENV_GUILD_ID = process.env.DISCORD_GUILD_ID;
-const ENV_LOA_CHANNEL_ID = process.env.DISCORD_LOA_CHANNEL_ID;
-const ENV_ANNOUNCE_CHANNEL_ID = process.env.DISCORD_ANNOUNCE_CHANNEL_ID;
-// Same admin role list auth.js uses to gate the website's admin area, so
-// "officer" means the same thing in Discord as it does on the site.
-const ENV_ADMIN_ROLE_IDS = (process.env.DISCORD_ADMIN_ROLE_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
-
-// -- Per-guild config, row first then env ------------------------------------
-const loaChannelOf = (g) => (g && g.loa_channel_id) || ENV_LOA_CHANNEL_ID;
-const announceChannelOf = (g) => (g && g.announce_channel_id) || ENV_ANNOUNCE_CHANNEL_ID;
-const adminRolesOf = (g) => {
-  const list = Array.isArray(g && g.admin_role_ids) ? g.admin_role_ids.map(String).filter(Boolean) : [];
-  return list.length ? list : ENV_ADMIN_ROLE_IDS;
-};
+// ── Per-guild config, from interaction.guildHall only ───────────────────────
+// One bot serves many servers, so nothing here may be decided at import time.
+// There is no env fallback: a channel or role list left empty on a guilds row
+// used to resolve to the deployment's own values, which meant one guild's LOA
+// posts landing in another guild's channel, and one guild's officers holding
+// officer powers inside another guild. An unconfigured guild gets nothing and
+// is told so (plan tasks 8 and 9).
+const loaChannelOf = (g) => (g && g.loa_channel_id) || '';
+const announceChannelOf = (g) => (g && g.announce_channel_id) || '';
+const adminRolesOf = (g) => (Array.isArray(g && g.admin_role_ids)
+  ? g.admin_role_ids.map(String).filter(Boolean) : []);
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // "21:00" -> "9:00 PM", for echoing a recurring LOA's start time back in chat.
@@ -117,7 +110,7 @@ function start(supabase) {
 // would post one guild's LOA or announcement into another's channel.
 function getGuild(discordGuildId) {
   if (!ready || !client) return null;
-  const id = String(discordGuildId || ENV_GUILD_ID || '');
+  const id = String(discordGuildId || '');
   return (id && client.guilds.cache.get(id)) || null;
 }
 

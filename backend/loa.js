@@ -6,7 +6,6 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // config file the branding lives in — so another guild re-theming this app
 // isn't silently stuck on US Eastern. Fallbacks keep an older guild.json
 // (without these keys) working unchanged.
-const GUILD_IDENTITY = require('../shared/guild.json');
 const { tenantDb } = require('./tenantDb');
 
 // DEFAULTS ONLY. In multi-tenant mode timezone and day_start come from the
@@ -14,7 +13,12 @@ const { tenantDb } = require('./tenantDb');
 // new guild is seeded from, not the live config (plan task 9). Keeping these as
 // fallbacks is what lets a single-tenant self-host that passes nothing keep
 // behaving exactly as it does today.
-const DEFAULT_TZ = GUILD_IDENTITY.timezone || 'America/New_York';
+// Last-resort defaults, used only when a guilds row somehow reaches here
+// without a timezone or rollover. They are NOT a guild's config: every real
+// value comes from the row (guilds.timezone / guilds.day_start). These used to
+// be read from shared/guild.json, which meant one guild's rollover was compiled
+// into the process and quietly applied to every other guild's events.
+const DEFAULT_TZ = 'America/New_York';
 
 // A guild night doesn't end at midnight. The 12:30am Guild Field Boss is the
 // tail of the previous evening's block, not the start of a new day — the
@@ -31,19 +35,16 @@ const minutesOf = (hhmm) => {
   return h * 60 + m;
 };
 
-const GUILD_DAY_START = /^\d{2}:\d{2}$/.test(GUILD_IDENTITY.dayStart || '')
-  ? GUILD_IDENTITY.dayStart
-  : '01:00';
-const GUILD_DAY_START_MIN = minutesOf(GUILD_DAY_START);
+const DEFAULT_DAY_START_MIN = minutesOf('01:00');
 
 // Normalizes whatever a caller has to the rollover in minutes. Accepts a guilds
-// row ({ day_start }), a bare "HH:MM", or nothing (falls back to the template).
+// row ({ day_start }), a bare "HH:MM", or nothing (falls back to the default).
 // Every helper below takes this rather than reading a module constant, because
 // two guilds on one process can have different guild-night boundaries and a
 // shared constant would silently apply one guild's night to the other's events.
 function dayStartMinOf(guild) {
   const raw = typeof guild === 'string' ? guild : guild && guild.day_start;
-  return /^\d{2}:\d{2}$/.test(raw || '') ? minutesOf(raw) : GUILD_DAY_START_MIN;
+  return /^\d{2}:\d{2}$/.test(raw || '') ? minutesOf(raw) : DEFAULT_DAY_START_MIN;
 }
 
 const tzOf = (guild) => (guild && guild.timezone) || DEFAULT_TZ;
@@ -403,4 +404,5 @@ module.exports.parseTimeOfDay = parseTimeOfDay;
 module.exports.daySlot = daySlot;
 module.exports.guildDayOfWeek = guildDayOfWeek;
 module.exports.isAfterMidnight = isAfterMidnight;
-module.exports.GUILD_DAY_START = GUILD_DAY_START;
+// No GUILD_DAY_START export any more: there is no such thing process-wide.
+// Callers pass the guilds row and the helpers above read its day_start.

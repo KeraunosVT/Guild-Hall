@@ -10,7 +10,9 @@ const { tenantDb } = require('./tenantDb');
 // the template a new guild is seeded from, not the live config (plan task 9).
 // Keeping it as the fallback is what lets a single-tenant self-host that never
 // passes a timezone keep behaving exactly as it does today.
-const DEFAULT_TZ = require('../shared/guild.json').timezone || 'America/New_York';
+// Last-resort default only — the real zone comes from guilds.timezone and is
+// passed in per call.
+const DEFAULT_TZ = 'America/New_York';
 
 // Offset (ms) that `timeZone`'s wall clock reads relative to UTC at the instant `date`
 // (e.g. -4h for America/New_York during EDT). Timezone-independent of the host

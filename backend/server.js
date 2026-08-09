@@ -489,6 +489,32 @@ app.get('/api/maps', async (req, res) => {
   res.json({ maps: data || [] });
 });
 
+// ── The active guild's own identity and time rules ──────────────────────────
+// Everything the client used to compile in from shared/guild.json. One
+// deployment serves many guilds, so the house name, tag, motto, creed and —
+// most importantly — the guild-night rollover cannot be baked into the bundle:
+// two guilds with different day_start values would otherwise both be shown
+// whichever one was built in, and their schedules would silently disagree about
+// which night an 00:30 event belongs to.
+//
+// Explicit field list: the guilds row also holds role ids, channel ids and
+// billing state, none of which the browser has any business seeing.
+app.get('/api/guild', (req, res) => {
+  const g = req.guild || {};
+  res.json({
+    guild: {
+      id: g.id,
+      house: g.house,
+      tag: g.tag,
+      aliases: Array.isArray(g.aliases) ? g.aliases : [],
+      motto: g.motto || null,
+      creed: g.creed || null,
+      timezone: g.timezone || 'America/New_York',
+      dayStart: g.day_start || '01:00',
+    },
+  });
+});
+
 // ── Elite boss respawn timers (read-only; reported via the /elitetimer Discord command) ──
 app.get('/api/elite-timers', async (req, res) => {
   if (!eliteTimers) return res.status(503).json({ error: 'Database not configured.' });

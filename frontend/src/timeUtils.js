@@ -1,10 +1,30 @@
-import identity from '../../shared/guild.json';
+// Timezone and guild-night rollover, delivered at runtime by GET /api/guild.
+//
+// These used to be compiled in from shared/guild.json. On a deployment serving
+// one guild that was fine; serving many it is not, because the bundle is shared
+// and whichever guild was built in would define the rollover for everyone —
+// two guilds with different day_start values disagreeing, silently, about which
+// night an 00:30 event belongs to.
+//
+// So the values are module state configured once at boot by configureGuildTime()
+// and again on a guild switch. Every function below reads them live rather than
+// closing over them, which is what makes reconfiguration take effect.
+//
+// The defaults exist only to keep these functions total if something calls them
+// before configuration; GuildProvider blocks rendering until the real values
+// have landed, so nothing user-facing should ever see them.
+let guildTz = 'America/New_York';
+let dayStart = '01:00';
 
-// Timezone and day-start rollover come from shared/guild.json — the single
-// per-guild config file — so backend/loa.js and this mirror can no longer
-// drift apart, and a re-themed deployment isn't pinned to US Eastern.
-// Fallbacks keep an older guild.json (without these keys) working unchanged.
-export const GUILD_TZ = identity.timezone || 'America/New_York';
+export function configureGuildTime({ timezone, dayStart: start } = {}) {
+  if (timezone) guildTz = timezone;
+  if (/^\d{2}:\d{2}$/.test(start || '')) dayStart = start;
+}
+
+// Accessors, not constants. `export const GUILD_TZ = guildTz` would freeze the
+// first guild's value into the bundle at import time — the exact bug this
+// replaces — so nothing here is ever captured, only read through a call.
+export const guildTimezone = () => guildTz;
 
 // Mirror of the guild-night model in backend/loa.js — keep the two in step.
 // A guild night doesn't end at midnight: the 12:30am Guild Field Boss is the
@@ -18,29 +38,27 @@ const minutesOf = (hhmm) => {
   return h * 60 + m;
 };
 
-export const GUILD_DAY_START = /^\d{2}:\d{2}$/.test(identity.dayStart || '')
-  ? identity.dayStart
-  : '01:00';
-const GUILD_DAY_START_MIN = minutesOf(GUILD_DAY_START);
+export const guildDayStart = () => dayStart;
+const dayStartMin = () => minutesOf(dayStart);
 
 // Where a wall-clock time falls within the guild night, as minutes from its
 // start — so 00:30 (1470) sorts after 21:00 (1260) instead of before it, which
 // is what comparing "HH:MM" as text would give you.
 export function daySlot(hhmm) {
   const mins = minutesOf(hhmm);
-  return mins < GUILD_DAY_START_MIN ? mins + MINUTES_PER_DAY : mins;
+  return mins < dayStartMin() ? mins + MINUTES_PER_DAY : mins;
 }
 
 // The day-of-week a scheduled event belongs to, from the calendar day and time
 // it's stored under: a 00:30 event stored on Sunday is part of Saturday night.
 export function guildDayOfWeek(dow, eventTime) {
-  if (!eventTime || minutesOf(eventTime) >= GUILD_DAY_START_MIN) return dow;
+  if (!eventTime || minutesOf(eventTime) >= dayStartMin()) return dow;
   return (dow + 6) % 7;
 }
 
 // True when an event runs after midnight, so its calendar day is a day ahead
 // of the night it belongs to — worth labelling wherever it's listed.
-export const isAfterMidnight = (eventTime) => Boolean(eventTime) && minutesOf(eventTime) < GUILD_DAY_START_MIN;
+export const isAfterMidnight = (eventTime) => Boolean(eventTime) && minutesOf(eventTime) < dayStartMin();
 
 // Events for one guild night, newest-last. Not a plain day_of_week filter:
 // Saturday night's list has to pull in the Sunday 00:30 row and leave Sunday
@@ -60,8 +78,8 @@ export function eventsForGuildDay(schedule, dow) {
 // midnight for the same reason: at 12:30am the night in progress is still
 // last night's.
 export function todayInGuildTz() {
-  const shifted = new Date(Date.now() - GUILD_DAY_START_MIN * 60_000);
-  return shifted.toLocaleDateString('en-CA', { timeZone: GUILD_TZ });
+  const shifted = new Date(Date.now() - dayStartMin() * 60_000);
+  return shifted.toLocaleDateString('en-CA', { timeZone: guildTz });
 }
 
 export function fmtTimeEst(t) {
@@ -80,7 +98,7 @@ export function fmtTimeEst(t) {
 const DISPLAY_TZ_KEY = 'displayTimezone';
 
 export function getDisplayTimezone() {
-  return localStorage.getItem(DISPLAY_TZ_KEY) || GUILD_TZ;
+  return localStorage.getItem(DISPLAY_TZ_KEY) || guildTz;
 }
 
 export function setDisplayTimezone(tz) {

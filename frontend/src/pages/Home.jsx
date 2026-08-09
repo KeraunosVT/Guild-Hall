@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { Users, Shield, Swords, Heart, CalendarDays, Clock, Package } from 'lucide-react';
-import { GUILD } from '../guild';
+import { useGuild } from '../guild';
 import { fmtTimeEst, todayInGuildTz, eventsForGuildDay, isAfterMidnight } from '../timeUtils';
 import ErrorState from '../components/ui/ErrorState';
 import StatTile from '../components/ui/StatTile';
@@ -45,6 +45,7 @@ function fmtCountdown(ms) {
 }
 
 export default function Home() {
+  const { house, guild } = useGuild();
   const [stats, setStats] = useState({});
   const [recentMatches, setRecentMatches] = useState([]);
   const [wdl, setWdl] = useState(null);
@@ -136,7 +137,7 @@ export default function Home() {
             Throne &amp; Liberty
           </div>
           <h1 className="rise rise-1 font-display font-bold text-bone text-5xl md:text-7xl tracking-[0.08em] leading-tight">
-            {GUILD.house}
+            {house}
           </h1>
         </div>
       </section>
@@ -189,7 +190,7 @@ export default function Home() {
                 ) : (
                   <div className="divide-y divide-line">
                     {recentMatches.slice(0, 3).map((m) => (
-                      <EngagementRow key={m.id} match={m} />
+                      <EngagementRow key={m.id} match={m} aliases={guild?.aliases || []} />
                     ))}
                   </div>
                 )}
@@ -311,11 +312,11 @@ export default function Home() {
   );
 }
 
-function EngagementRow({ match }) {
+function EngagementRow({ match, aliases }) {
   const result = match.result;
   // Older rows carry whatever name we fought under at the time, so match
   // against every alias rather than just the current tag.
-  const held = result ? result === 'Win' : GUILD.aliases.includes(match.winningGuild);
+  const held = result ? result === 'Win' : aliases.includes(match.winningGuild);
   const decided = result ? result !== 'Draw' : match.killDifference > 0;
 
   const date = match.match_date

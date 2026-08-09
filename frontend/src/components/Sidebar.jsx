@@ -5,7 +5,7 @@ import {
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
 } from 'lucide-react';
 import Sigil from './Sigil';
-import { GUILD } from '../guild';
+import { useGuild } from '../guild';
 import { useAuth } from '../auth';
 import { getDisplayTimezone, setDisplayTimezone, TIMEZONE_OPTIONS } from '../timeUtils';
 
@@ -68,6 +68,7 @@ export function getInitialSidebarCollapsed() {
 }
 
 export default function Sidebar({ collapsed }) {
+  const { house, tag } = useGuild();
   const { user, logout, can } = useAuth();
   // Section disappears entirely when no capability opens anything in it.
   const adminNav = visibleAdminLinks(can);
@@ -83,8 +84,8 @@ export default function Sidebar({ collapsed }) {
         <Sigil className="w-7 h-9 text-brass shrink-0" />
         {!collapsed && (
           <div className="leading-none min-w-0">
-            <div className="font-display text-bone text-sm tracking-[0.18em] truncate">{GUILD.house.toUpperCase()}</div>
-            <div className="text-[10px] text-ash tracking-[0.25em] mt-1">⟨ {GUILD.tag} ⟩</div>
+            <div className="font-display text-bone text-sm tracking-[0.18em] truncate">{house.toUpperCase()}</div>
+            {tag && <div className="text-[10px] text-ash tracking-[0.25em] mt-1">⟨ {tag} ⟩</div>}
           </div>
         )}
       </NavLink>

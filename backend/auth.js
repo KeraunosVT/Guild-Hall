@@ -39,25 +39,9 @@ const {
   DISCORD_CLIENT_ID,
   DISCORD_CLIENT_SECRET,
   DISCORD_REDIRECT_URI,
-  DISCORD_GUILD_ID,
-  DISCORD_ALLOWED_ROLE_IDS = '',
   JWT_SECRET,
   APP_URL = '/',
 } = process.env;
-
-// Comma-separated role IDs that are allowed in. Empty list = any member of the
-// guild is allowed (membership alone gates access).
-//
-// These two env vars are the FALLBACK now, not the source of truth: role config
-// lives on the guilds row (allowed_role_ids / admin_role_ids) so each tenant
-// sets its own (plan task 9). The env values still apply when a row leaves them
-// empty, which is what keeps an existing single-guild deployment working before
-// its row is filled in.
-const ALLOWED_ROLES = DISCORD_ALLOWED_ROLE_IDS.split(',').map(s => s.trim()).filter(Boolean);
-
-// Admin role IDs — a tighter check for the admin area. Empty list = nobody is an
-// admin until configured (fails closed).
-const ADMIN_ROLES = (process.env.DISCORD_ADMIN_ROLE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 // Model B (single-guild self-host) pins one tenant; anything else is Model A,
 // the shared multi-guild deployment. The difference shows up in exactly two
@@ -65,11 +49,15 @@ const ADMIN_ROLES = (process.env.DISCORD_ADMIN_ROLE_IDS || '').split(',').map(s 
 // evaluate. Everything downstream is the same code path.
 const SINGLE_GUILD_ID = process.env.SINGLE_GUILD_ID || null;
 
-// Per-guild role config, falling back to env when the row hasn't set it.
-const rolesFrom = (guild, column, fallback) => {
-  const list = Array.isArray(guild && guild[column]) ? guild[column].map(String).filter(Boolean) : [];
-  return list.length ? list : fallback;
-};
+// Per-guild role config. The guilds row is the only source: an env fallback
+// here handed one tenant's officer roles authority inside another tenant's
+// guild, which is the single worst thing this system could get wrong.
+//
+// An empty allowed_role_ids still means "any member of the server gets in" —
+// that is a real configuration choice. An empty admin_role_ids means nobody is
+// an officer, which fails closed.
+const rolesFrom = (guild, column) => (Array.isArray(guild && guild[column])
+  ? guild[column].map(String).filter(Boolean) : []);
 
 const COOKIE_NAME = 'gh_session';
 const STATE_COOKIE = 'gh_oauth_state';
@@ -240,18 +228,19 @@ router.post('/logout', (req, res) => {
 // become session claims, and it runs on both login and the hourly re-verify —
 // so a changed grant reaches an existing session without any extra machinery.
 //
-// A role in ADMIN_ROLES is absolute: it holds every capability, including ones
-// added in later releases, and can't be narrowed from the permissions page.
+// A role in the guild's own admin_role_ids is absolute: it holds every
+// capability, including ones added in later releases, and can't be narrowed
+// from the permissions page.
 // That's the deliberate escape hatch — a mistaken grant can't lock everyone out
 // of the site, because whoever holds the env-configured admin role still gets in.
 async function evaluateMember(member, guild) {
   const roles = (member?.roles || []).map(String);
-  const allowedRoles = rolesFrom(guild, 'allowed_role_ids', ALLOWED_ROLES);
+  const allowedRoles = rolesFrom(guild, 'allowed_role_ids');
   const allowed = allowedRoles.length === 0 || roles.some((r) => allowedRoles.includes(r));
   if (!allowed) return null;
   const u = member.user || {};
 
-  const adminRoles = rolesFrom(guild, 'admin_role_ids', ADMIN_ROLES);
+  const adminRoles = rolesFrom(guild, 'admin_role_ids');
   const fullAccess = adminRoles.length > 0 && roles.some((r) => adminRoles.includes(r));
   const granted = fullAccess
     ? perms.ALL_PERMISSIONS.map((p) => p.key)
@@ -442,9 +431,14 @@ const REVOKED = Symbol('revoked');
 async function reverify(user) {
   // A session from before task 10 has no guilds list; re-verify it against the
   // pinned guild so it comes back in the new shape instead of being stuck.
-  const list = Array.isArray(user.guilds) && user.guilds.length
-    ? user.guilds
-    : (SINGLE_GUILD_ID ? [{ guild_id: SINGLE_GUILD_ID, discord_guild_id: DISCORD_GUILD_ID }] : []);
+  // Pre-task-10 sessions carry no guilds list. In pinned mode they can still be
+  // re-verified against the pinned tenant, whose Discord id comes from its row —
+  // never from env, which on a shared host is a different guild entirely.
+  let list = Array.isArray(user.guilds) && user.guilds.length ? user.guilds : [];
+  if (!list.length && SINGLE_GUILD_ID) {
+    const pinned = await guildRegistry.resolveById(db, SINGLE_GUILD_ID);
+    if (pinned) list = [{ guild_id: pinned.id, discord_guild_id: pinned.discord_guild_id }];
+  }
   if (!list.length) return null;
 
   let anyReachable = false;

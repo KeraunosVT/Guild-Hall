@@ -161,6 +161,34 @@ for (const f of files) {
 }
 console.log(`4. helpers: no module-level function references an out-of-scope req`);
 
+// ── 5. No guild-specific config read from env ───────────────────────────────
+// Per-guild config must come from the guilds row. Reading it from env means one
+// deployment's values apply to every tenant on it — one guild's officer roles
+// granting powers inside another's, or one guild's LOA posts landing in
+// another's channel. Neither errors; both are silent cross-tenant bleed.
+//
+// DISCORD_BOT_TOKEN and the OAuth client secrets stay in env: they belong to the
+// deployment, not to any guild.
+const GUILD_SCOPED_ENV = [
+  'DISCORD_GUILD_ID', 'DISCORD_ADMIN_ROLE_IDS', 'DISCORD_ALLOWED_ROLE_IDS',
+  'DISCORD_MEMBER_ROLE_IDS', 'DISCORD_ROSTER_CHANNEL_ID', 'DISCORD_LOA_CHANNEL_ID',
+  'DISCORD_ANNOUNCE_CHANNEL_ID',
+];
+let envReads = 0;
+for (const f of files) {
+  const src = read(f);
+  src.split('\n').forEach((line, i) => {
+    if (/^\s*(\/\/|\*)/.test(line)) return; // comments may still name them
+    for (const name of GUILD_SCOPED_ENV) {
+      if (line.includes(name)) {
+        envReads++;
+        report(`GUILD CONFIG IN ENV ${f}:${i + 1}  reads ${name} — per-guild config belongs on the guilds row`);
+      }
+    }
+  });
+}
+console.log(`5. env: no guild-specific config read from environment variables`);
+
 // ── Result ──────────────────────────────────────────────────────────────────
 if (fail) {
   console.log(`\n${fail} problem(s):`);
