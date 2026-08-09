@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Guild Hall — one home for your MMO guild</title>
   <meta name="description" content="Rosters, attendance, gear, loot councils, and war stats for your MMO guild — with login through Discord. Free during early access." />
   <meta property="og:title" content="Guild Hall" />
@@ -161,9 +162,19 @@
 <body>
   <header class="wrap">
     <nav>
+      <!-- Inline, not <img>: an SVG loaded through <img> is an isolated
+           document that cannot use this page's Sora webfont, so the wordmark
+           would fall back to a system sans and stop matching the headings. -->
       <div class="brand">
-        <div class="brand-mark">G</div>
-        <div class="brand-name">Guild Hall</div>
+        <svg viewBox="0 0 420 90" font-family="Sora, sans-serif" role="img" aria-label="Guild Hall"
+             style="height:44px;width:auto;display:block;">
+          <defs><linearGradient id="gh-nav-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#d64545"/><stop offset="1" stop-color="#3a1b18"/>
+          </linearGradient></defs>
+          <rect x="9" y="12" width="66" height="66" rx="16" fill="url(#gh-nav-grad)"/>
+          <g transform="translate(21 24) scale(0.42)" fill="#ffffff"><path d="M50 6 A44 44 0 1 0 94 50 L94 46 L60 46 L60 60 L78 60 A28.5 28.5 0 1 1 50 21.5 A28.3 28.3 0 0 1 69 28.8 L79.5 18.3 A43.8 43.8 0 0 0 50 6 Z"/><rect x="38" y="34" width="8.5" height="33" rx="2.2"/><rect x="55" y="34" width="8.5" height="33" rx="2.2"/><rect x="38" y="46" width="25.5" height="8" rx="2.2"/></g>
+          <text x="92" y="59" font-size="38" font-weight="800" letter-spacing="-0.02em"><tspan fill="#ececeb">Guild</tspan><tspan fill="#d64545">Hall</tspan></text>
+        </svg>
       </div>
       <div style="display:flex; gap:12px; align-items:center;">
         <a href="/api/auth/login" class="btn btn-ghost" style="border-color:transparent;">Member login</a>

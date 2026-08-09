@@ -1,5 +1,5 @@
 import { useAuth } from '../auth';
-import Sigil from '../components/Sigil';
+import Lockup from '../components/Lockup';
 
 // The login page is the one screen that cannot know which guild it belongs to:
 // it renders before there is a session, and the session is what says which
@@ -26,14 +26,13 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-ink text-bone flex flex-col items-center justify-center px-6 text-center">
+      {/* The product's own mark, not a house's — this page renders before
+          there is a session, so no guild is known yet. */}
       <div className="rise">
-        <Sigil className="w-16 h-20 text-brass mx-auto" />
+        <Lockup className="w-[300px] md:w-[360px] h-auto mx-auto" />
       </div>
 
       <div className="rise rise-1 eyebrow text-brass text-[11px] mt-8 mb-4">The gate is barred</div>
-      <h1 className="rise rise-1 font-display font-bold text-bone text-4xl md:text-5xl tracking-[0.08em]">
-        Guild Hall
-      </h1>
       <p className="rise rise-2 font-display text-brassbright text-lg md:text-xl tracking-[0.12em] mt-6">
         Muster the house.
       </p>
