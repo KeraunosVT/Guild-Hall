@@ -18,7 +18,57 @@ const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const perms = require('../../permissions');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+// Prefer a dedicated test project. TEST_SUPABASE_URL exists so these suites
+// never have to point at the same database the live site serves.
+const URL = process.env.TEST_SUPABASE_URL || process.env.SUPABASE_URL;
+const KEY = process.env.TEST_SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY;
+const usingFallback = !process.env.TEST_SUPABASE_URL;
+
+const supabase = createClient(URL, KEY);
+
+// Refuse to run against a database that already holds guild data.
+//
+// These suites create tenants, write to every table and delete on the way out.
+// All of it is scoped to their own fixture guilds, so a correct run cannot
+// touch a real tenant — but "cannot" here rests on the cleanup being right,
+// and that is exactly the assumption you do not want to be making against the
+// database members are using. An empty database is safe to be wrong in.
+//
+// Set TEST_SUPABASE_URL / TEST_SUPABASE_SERVICE_KEY to a scratch project, or
+// ALLOW_TESTS_ON_NONEMPTY_DB=1 if you have decided the risk is acceptable.
+const CANARY_TABLES = ['wargame_matches', 'loot_awards', 'loa_entries', 'events', 'player_identities'];
+
+async function assertSafeTarget() {
+  if (process.env.ALLOW_TESTS_ON_NONEMPTY_DB === '1') return;
+
+  // Rows belonging to this suite's own fixture guilds don't count. A run that
+  // aborts before cleanup leaves them behind, and counting those would let one
+  // crash lock out every subsequent run — the guard would be protecting the
+  // database from nothing but itself. purgeStale() clears them moments later.
+  const { data: fixtures } = await supabase.from('guilds')
+    .select('id').in('discord_guild_id', FIXTURE_DISCORD_GUILDS);
+  const fixtureIds = (fixtures || []).map((r) => r.id);
+
+  let rows = 0;
+  for (const t of CANARY_TABLES) {
+    let q = supabase.from(t).select('*', { count: 'exact', head: true });
+    // PostgREST needs the list bracketed; an empty `not.in` matches nothing.
+    if (fixtureIds.length) q = q.not('guild_id', 'in', `(${fixtureIds.join(',')})`);
+    const { count } = await q;
+    rows += count || 0;
+  }
+  if (!rows) return;
+
+  const project = (URL || '').replace(/^https?:\/\//, '').replace(/\..*$/, '');
+  throw new Error(
+    `Refusing to run integration tests against ${project}: it holds ${rows} row(s) of real guild data.\n` +
+    (usingFallback
+      ? '  This is SUPABASE_URL — the same database the application uses.\n'
+      : '  This is TEST_SUPABASE_URL.\n') +
+    '  Point TEST_SUPABASE_URL / TEST_SUPABASE_SERVICE_KEY at a scratch project,\n' +
+    '  or set ALLOW_TESTS_ON_NONEMPTY_DB=1 to override deliberately.',
+  );
+}
 
 const A_MARK = 'AAOWNED';
 const B_MARK = 'ZZBLEAK';
@@ -132,6 +182,7 @@ const guildSeed = (house, tag, discordId, tz) => ({
 
 // Build both tenants from scratch. Returns everything a test needs.
 async function setup() {
+  await assertSafeTarget();
   await purgeStale();
 
   const mk = async (seed) => {
@@ -171,4 +222,4 @@ async function setup() {
   };
 }
 
-module.exports = { setup, purge, purgeStale, supabase, A_MARK, B_MARK, SCOPED_TABLES, FIXTURE_DISCORD_GUILDS };
+module.exports = { setup, purge, purgeStale, supabase, assertSafeTarget, A_MARK, B_MARK, SCOPED_TABLES, FIXTURE_DISCORD_GUILDS };

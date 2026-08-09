@@ -18,7 +18,9 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { createClient } = require('@supabase/supabase-js');
 
-const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+// Same target selection and same safety guard as the other suites: prefer a
+// scratch project, and refuse a database that already holds real guild data.
+const { assertSafeTarget, supabase: s } = require('./lib/harness');
 const gw = require('../discordGateway');
 const T = gw.__test;
 
