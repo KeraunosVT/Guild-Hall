@@ -9,6 +9,7 @@ const perms = require('./permissions');
 const createLoa = require('./loa');
 const { todayInGuildTz } = createLoa;
 const createAttendance = require('./attendance');
+const createEventSignups = require('./eventSignups');
 const SHARDS = require('../shared/shards.json');
 // shared/guild.json is only the seed template now; live per-guild config comes
 // from req.guild (the guilds row) — plan task 9.
@@ -122,6 +123,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // identities is passed so LOA names resolve to the site alias, matching
   // what the website and the /loa command show.
   const loa = supabase ? createLoa(supabase, identities) : null;
+  const signups = supabase ? createEventSignups(supabase, identities) : null;
 
   router.get('/whoami', (req, res) => {
     res.json({ admin: true, username: req.user.username });
@@ -1234,7 +1236,80 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       }
     }
 
-    res.json({ event, attendees: attendees || [], absences });
+    // ── Reconciliation against the signup, if one was opened ────────────────
+    // This is the payoff of keeping signups and attendance as two records that
+    // get JOINED rather than one that gets overwritten. Neither is derivable
+    // from the other: "said they'd come" and "was in the channel" are different
+    // facts, and the interesting officer questions live in the gap between them.
+    //
+    //   signedUpNoShow — declared attendance, then didn't turn up. Ranked above
+    //     the generic no-LOA group because it is a stronger signal: someone who
+    //     never answered may simply not have seen the post, where someone who
+    //     clicked "I'm in" made a commitment. Removed from the excused and
+    //     unexcused lists so a member appears in exactly one bucket, but their
+    //     LOA (if they filed one after signing up) travels with them.
+    //   walkIns — turned up without signing up. Not a fault, and never shown as
+    //     one; it's the number that says whether signups are being used at all.
+    let signupSummary = null;
+    if (event.event_date && signups) {
+      try {
+        const view = await signups.forOccasion(req.guild, {
+          date: event.event_date,
+          eventScheduleId: event.event_schedule_id || null,
+        });
+        if (view) {
+          const present = new Set((attendees || []).map((a) => String(a.discord_id)));
+          const declared = new Set(view.going.map((e) => String(e.discord_id)));
+          const noShow = view.going
+            .filter((e) => !present.has(String(e.discord_id)))
+            .map((e) => ({
+              discord_id: e.discord_id,
+              display_name: e.display_name,
+              loa: absences ? (absences.excused.find((m) => String(m.discord_id) === String(e.discord_id))?.loa || null) : null,
+            }));
+          const noShowIds = new Set(noShow.map((m) => String(m.discord_id)));
+          if (absences) {
+            absences.excused = absences.excused.filter((m) => !noShowIds.has(String(m.discord_id)));
+            absences.unexcused = absences.unexcused.filter((m) => !noShowIds.has(String(m.discord_id)));
+          }
+          signupSummary = {
+            id: view.id,
+            title: view.title,
+            capacity: view.capacity,
+            counts: view.counts,
+            composition: view.composition,
+            signedUpNoShow: noShow.sort((a, b) => String(a.display_name).localeCompare(String(b.display_name))),
+            walkIns: (attendees || [])
+              .filter((a) => !declared.has(String(a.discord_id)))
+              .map((a) => a.discord_id),
+          };
+        }
+      } catch (err) {
+        console.error('Attendance signup reconciliation failed:', err.message);
+      }
+    }
+
+    res.json({ event, attendees: attendees || [], absences, signup: signupSummary });
+  });
+
+  // ── Signups: read-only feed for the party builder ───────────────────────────
+  // Sibling of /loa/unavailable, matched on the same (date, event) pair so the
+  // two line up on the same night by construction. Read-only: the builder shows
+  // who's coming and can seed parties from it, but every signup WRITE lives at
+  // /api/signups — this endpoint cannot change anyone's standing.
+  //
+  // Gated on 'parties' rather than 'attendance' (see permissions.js): the page
+  // fetches this on load, so an officer granted parties alone would otherwise
+  // watch their own board 403 on a request they never made.
+  router.get('/signups', async (req, res) => {
+    if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+    const date = req.query.date || todayInGuildTz(req.guild);
+    try {
+      const signup = await signups.forOccasion(req.guild, { date, eventScheduleId: req.query.event || null });
+      res.json({ date, signup });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message || 'Failed to load signups.' });
+    }
   });
 
   router.post('/events', async (req, res) => {

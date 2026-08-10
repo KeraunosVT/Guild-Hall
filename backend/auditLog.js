@@ -21,6 +21,13 @@ const FEATURE_PREFIXES = [
   { prefix: '/voice-channels', label: 'Attendance' },
   { prefix: '/events', label: 'Attendance' },
   { prefix: '/attendance', label: 'Attendance' },
+  // Signups are attendance data — they're what the "signed up, didn't show"
+  // bucket is reconciled against — so they share the label rather than
+  // introducing a category officers would have to learn. Writes reach the log
+  // from backend/eventSignups.js directly (a Discord button is not an HTTP
+  // request), which stamps this same string; the prefix covers the party
+  // builder's feed under /api/admin.
+  { prefix: '/signups', label: 'Attendance' },
   { prefix: '/gear-ilvl', label: 'Gear Levels' },
   { prefix: '/event-schedule', label: 'LOA Schedule' },
   { prefix: '/members', label: 'Members' },

@@ -81,6 +81,9 @@ const SCOPED_TABLES = [
   'loot_categories', 'loot_items', 'loot_awards', 'loot_wishlists',
   'wargame_matches', 'wargame_maps', 'player_match_stats',
   'events', 'event_attendance', 'event_schedule',
+  // Parent before child: entries cascade from signups, and purge() reverses
+  // this list, so the order here is what makes the teardown legal.
+  'event_signups', 'event_signup_entries',
   'player_identities', 'member_roles', 'shard_counts',
   'gear_levels', 'gear_level_history',
   'loa_entries', 'elite_timers', 'rosters',
@@ -126,13 +129,22 @@ function seedRows(guildId, m, n, tag) {
   ];
 }
 
+// A table the schema doesn't have yet is almost always an unapplied migration,
+// not a broken fixture — and "Could not find the table in the schema cache" is
+// not a sentence that tells anyone what to do about it. Say the actual thing.
+function seedError(table, m, message) {
+  const missing = /could not find the table/i.test(message);
+  return new Error(`seed ${table} for ${m}: ${message}`
+    + (missing ? `\n  '${table}' does not exist — a migration in migrations/ has not been applied to this database yet.` : ''));
+}
+
 async function insertSeed(guildId, m, n, tag) {
   const created = {};
   for (const [table, row] of seedRows(guildId, m, n, tag)) {
     const payload = { ...row };
     if (payload.id === null) delete payload.id; // let the default uuid apply
     const { data, error } = await supabase.from(table).insert(payload).select('*').maybeSingle();
-    if (error) throw new Error(`seed ${table} for ${m}: ${error.message}`);
+    if (error) throw seedError(table, m, error.message);
     created[table] = data;
   }
 
@@ -140,7 +152,7 @@ async function insertSeed(guildId, m, n, tag) {
   const now = iso();
   const kid = async (table, row) => {
     const { data, error } = await supabase.from(table).insert(row).select('*').maybeSingle();
-    if (error) throw new Error(`seed ${table} for ${m}: ${error.message}`);
+    if (error) throw seedError(table, m, error.message);
     created[table] = data;
   };
   await kid('player_match_stats', {
@@ -154,6 +166,19 @@ async function insertSeed(guildId, m, n, tag) {
   await kid('event_attendance', {
     guild_id: guildId, event_id: created.events.id,
     discord_id: `${n}${'1'.padStart(11, '0')}`, display_name: `${m} Player`, joined_at: now,
+  });
+  // Far-future start time on purpose: the auto-close sweep closes anything that
+  // has already begun, and a fixture that closes itself mid-run would make the
+  // join/withdraw isolation checks pass for the wrong reason.
+  await kid('event_signups', {
+    guild_id: guildId, event_schedule_id: created.event_schedule.id,
+    title: `${m} Signup`, starts_at: '2099-06-01T21:00:00Z', event_date: '2099-06-01',
+    capacity: 6, status: 'open', channel_id: `signup-${tag}`, created_by: `${m} Officer`,
+  });
+  await kid('event_signup_entries', {
+    guild_id: guildId, signup_id: created.event_signups.id,
+    discord_id: `${n}${'1'.padStart(11, '0')}`, display_name: `${m} Player`,
+    status: 'going', joined_at: now,
   });
 
   return created;

@@ -29,6 +29,7 @@ const createEliteTimers = require('./eliteTimers');
 const createGearIlvl = require('./gearIlvl');
 const createIdentities = require('./identities');
 const createLoa = require('./loa');
+const createEventSignups = require('./eventSignups');
 const createAuditLog = require('./auditLog');
 
 const gearUpload = multer({
@@ -114,6 +115,9 @@ const identities = supabase ? createIdentities(supabase) : null;
 // identities is built above: LOA display names resolve through it so an
 // entry reads the same on the site, via /loa, and in the Discord post.
 const loa = supabase ? createLoa(supabase, identities) : null;
+// Same identities argument, same reason: a signup has to read the same name on
+// the web page, in the Discord embed, and on a party card.
+const signups = supabase ? createEventSignups(supabase, identities) : null;
 const auditLog = supabase ? createAuditLog(supabase) : null;
 // Guild resolution needs the client to read the tenant registry, so it's built
 // here alongside the other factories rather than imported as a bare middleware.
@@ -629,6 +633,237 @@ app.delete('/api/loa/:id', async (req, res) => {
     const { messageId } = await loa.cancel(req.guild, req.params.id, req.user.id, userHas(req.user, 'loa.admin'));
     res.json({ ok: true });
     gateway.deleteLoaMessage(req.guild, messageId);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── EVENT SIGNUPS ────────────────────────────────────────────────────────────
+// Opt-in attendance for a dated occurrence: a row means "I'm coming", and there
+// is no row for "I'm not" (see backend/eventSignups.js for the full argument).
+//
+// These sit under the plain /api login wall rather than the /api/admin mount,
+// following the LOA routes: this is a MEMBER page with officer controls on it,
+// not an admin page. Officer actions therefore check their capability inline.
+//
+// That capability is the EXISTING 'attendance' key, and no new one was added on
+// purpose. A new entry in ALL_PERMISSIONS starts granted to nobody, so shipping
+// one would lock every granular officer out of a feature they're supposed to
+// run until someone re-granted it by hand — while leaving blanket admins (who
+// hold every key) entirely unaffected. That is precisely the wrong group to
+// inconvenience, and signups are attendance data by any reading.
+const requireSignupOfficer = (req, res) => {
+  if (userHas(req.user, 'attendance')) return true;
+  res.status(403).json({ error: 'You don\'t have the "attendance" permission.' });
+  return false;
+};
+
+// Officers see two extra things on every read: the undecided split into "on
+// LOA" vs "no response", and anyone who signed up while also having an LOA on
+// file. Both are officer-shaped questions, and the second one names members in
+// a way the whole guild has no business seeing.
+const signupViewOpts = (req) => ({ viewerId: req.user.id, officer: userHas(req.user, 'attendance') });
+
+app.get('/api/signups', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json({ signups: await signups.list(req.guild, signupViewOpts(req)) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Before /:id — Express matches in declaration order, so a literal path that
+// looks like a parameter has to be registered first or "mine" is read as an id.
+app.get('/api/signups/mine', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json({ signups: await signups.mine(req.guild, req.user.id) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.get('/api/signups/:id', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json({ signup: await signups.detail(req.guild, req.params.id, signupViewOpts(req)) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Join. A body carrying discord_id means "on this member's behalf", which takes
+// the officer capability — otherwise the target is always the caller, whatever
+// the body says. Same rule as POST /api/loa.
+app.post('/api/signups/:id/join', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  const { discord_id, display_name } = req.body || {};
+  const onBehalf = Boolean(discord_id) && String(discord_id) !== String(req.user.id);
+  if (onBehalf && !requireSignupOfficer(req, res)) return;
+  try {
+    const result = await signups.join(req.guild, req.params.id, {
+      discordId: onBehalf ? discord_id : req.user.id,
+      displayName: onBehalf ? (display_name || 'Member') : req.user.username,
+      addedBy: onBehalf ? (req.user.username || req.user.id) : null,
+    });
+    res.json(result);
+    // The embed is refreshed after answering, and the refresh is itself
+    // debounced — a burst of clicks must not turn into a burst of Discord edits
+    // hanging off the request that caused them.
+    gateway.refreshSignupMessage(req.guild, req.params.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Withdraw — back to UNDECIDED, never to "declined". Nothing here records an
+// absence; that is what the LOA system is for.
+app.delete('/api/signups/:id/join', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    const result = await signups.withdraw(req.guild, req.params.id, { discordId: req.user.id });
+    res.json(result);
+    gateway.refreshSignupMessage(req.guild, req.params.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Officer: remove someone else's entry (a correction, or a member who asked in
+// chat). Distinct route from the self-withdraw above so the capability check
+// can't be reached by omitting a field.
+app.delete('/api/signups/:id/entries/:discordId', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  try {
+    const result = await signups.withdraw(req.guild, req.params.id, {
+      discordId: req.params.discordId,
+      removedBy: req.user.username || req.user.id,
+    });
+    res.json(result);
+    gateway.refreshSignupMessage(req.guild, req.params.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Officer: open signups for an occurrence, and post the announcement.
+app.post('/api/signups', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  const { event_schedule_id, event_date, start_time, title, capacity, reminder_lead_minutes, post } = req.body || {};
+  try {
+    const signup = await signups.create(req.guild, {
+      eventScheduleId: event_schedule_id || null,
+      eventDate: event_date,
+      startTime: start_time || null,
+      title,
+      capacity,
+      reminderLeadMinutes: reminder_lead_minutes,
+      createdBy: req.user.username || req.user.id,
+    });
+    // Answer first — the signup is saved by this point, and Discord is a third
+    // party that can be slow or down. Awaiting it here made a successful save
+    // look like a failure to whoever opened it (same lesson as POST /api/loa).
+    res.json({ signup });
+    if (post !== false) postSignupFor(req.guild, signup.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Post (or re-post) the announcement and remember where it landed. Re-posting
+// is the fix for a message an officer deleted by hand: the buttons key off the
+// occurrence id alone, so a fresh message is fully functional immediately.
+async function postSignupFor(guild, id) {
+  try {
+    const view = await signups.detail(guild, id);
+    const posted = await gateway.postSignupMessage(guild, view);
+    if (posted) await signups.setMessage(guild, id, posted.channelId, posted.messageId);
+  } catch (err) {
+    console.error('Signup post failed:', err.message);
+  }
+}
+
+app.post('/api/signups/:id/post', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  try {
+    const view = await signups.detail(req.guild, req.params.id);
+    const posted = await gateway.postSignupMessage(req.guild, view);
+    if (!posted) return res.status(502).json({ error: 'Could not post to Discord — check the signup channel and the bot\'s permissions.' });
+    await signups.setMessage(req.guild, req.params.id, posted.channelId, posted.messageId);
+    res.json({ ok: true, message_id: posted.messageId });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/signups/:id', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  const { capacity, reminder_lead_minutes } = req.body || {};
+  try {
+    let promoted = 0;
+    // Capacity goes through its own locking function because raising it
+    // promotes from the waitlist; the reminder lead is a plain column and has
+    // no business sitting behind that lock.
+    if (capacity !== undefined) {
+      ({ promoted } = await signups.setCapacity(req.guild, req.params.id, capacity, { id: req.user.id, name: req.user.username }));
+    }
+    if (reminder_lead_minutes !== undefined) {
+      await signups.setReminder(req.guild, req.params.id, reminder_lead_minutes, { id: req.user.id, name: req.user.username });
+    }
+    res.json({ ok: true, promoted });
+    if (capacity !== undefined) gateway.refreshSignupMessage(req.guild, req.params.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post('/api/signups/:id/close', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  try {
+    await signups.close(req.guild, req.params.id, { id: req.user.id, name: req.user.username });
+    res.json({ ok: true });
+    // Strips the buttons rather than disabling them: a greyed-out "I'm in" is
+    // an invitation to keep clicking something that will never work.
+    gateway.refreshSignupMessage(req.guild, req.params.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Officer: send the reminder now rather than waiting for the lead time.
+//
+// It contends for the SAME claim the 60-second sweep uses, so an officer
+// pressing this while the sweep is mid-flight can't produce a second batch of
+// DMs — one of them wins the conditional update and the other is told so.
+app.post('/api/signups/:id/remind', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  try {
+    const signup = await signups.detail(req.guild, req.params.id);
+    if (!(await signups.claimReminder(req.guild, req.params.id))) {
+      return res.status(409).json({ error: 'A reminder has already gone out for this event (or it has already started).' });
+    }
+    const recipients = await signups.reminderRecipients(req.guild, signup);
+    res.json({ ok: true, sending: recipients.length });
+    gateway.sendSignupReminders(req.guild, signup, recipients);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/signups/:id', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  if (!requireSignupOfficer(req, res)) return;
+  try {
+    const { channelId, messageId } = await signups.remove(req.guild, req.params.id, { id: req.user.id, name: req.user.username });
+    res.json({ ok: true });
+    gateway.deleteSignupMessage(req.guild, channelId, messageId);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

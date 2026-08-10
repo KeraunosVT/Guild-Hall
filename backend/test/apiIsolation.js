@@ -86,6 +86,10 @@ const section = (t) => console.log('\n' + t);
       ['/api/admin/permissions', A_MARK],
       ['/api/admin/audit-log', A_MARK],
       ['/api/admin/loa/unavailable', null],
+      ['/api/signups', A_MARK],
+      ['/api/signups/mine', null],
+      ['/api/signups/' + idA.event_signups.id, A_MARK],
+      ['/api/admin/signups?date=2099-06-01', A_MARK],
       ['/api/admin/match/' + idA.wargame_matches.id, A_MARK],
       ['/api/admin/loot/import-status', null],
     ];
@@ -140,6 +144,17 @@ const section = (t) => console.log('\n' + t);
       ['PATCH', '/api/admin/loot/awards/' + idB.loot_awards.id, { note: 'hijacked' }],
       ['PATCH', '/api/admin/currency-awards/' + idB.currency_awards.id, { amount: 999 }],
       ['PATCH', '/api/admin/lucent-requests/' + idB.lucent_requests.id, { status: 'approved' }],
+      // Signups are addressed by occurrence id everywhere — including from a
+      // Discord button, whose customId is nothing but that id — so an id from
+      // another tenant is the one input this feature is most exposed to. Every
+      // write below goes through a Postgres function that takes p_guild_id, so
+      // B's row is not merely hidden, it is not reachable.
+      ['GET', '/api/signups/' + idB.event_signups.id],
+      ['POST', '/api/signups/' + idB.event_signups.id + '/join', {}],
+      ['DELETE', '/api/signups/' + idB.event_signups.id + '/join'],
+      ['PATCH', '/api/signups/' + idB.event_signups.id, { capacity: 99 }],
+      ['POST', '/api/signups/' + idB.event_signups.id + '/close', {}],
+      ['DELETE', '/api/signups/' + idB.event_signups.id],
     ];
 
     // Snapshot every table B owns, so "untouched" is a fact and not a hope.
@@ -147,7 +162,8 @@ const section = (t) => console.log('\n' + t);
       const out = {};
       for (const t of ['wargame_matches', 'events', 'rosters', 'player_identities', 'loot_awards',
         'currency_awards', 'lucent_requests', 'event_schedule', 'loot_items', 'loot_categories',
-        'loa_entries', 'loot_wishlists', 'shard_counts', 'gear_levels']) {
+        'loa_entries', 'loot_wishlists', 'shard_counts', 'gear_levels',
+        'event_signups', 'event_signup_entries']) {
         const { data } = await fx.supabase.from(t).select('*').eq('guild_id', B.id);
         out[t] = JSON.stringify(data);
       }

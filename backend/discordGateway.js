@@ -1,11 +1,15 @@
 // backend/discordGateway.js — Lightweight discord.js gateway client.
 // Maintains a WebSocket connection so we can read voice-channel state (which the
 // REST API does not expose), and handles the guild's slash commands.
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags, ChannelType } = require('discord.js');
+const {
+  Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags, ChannelType,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+} = require('discord.js');
 const createEliteTimers = require('./eliteTimers');
 const createLoa = require('./loa');
 const createIdentities = require('./identities');
 const createAttendance = require('./attendance');
+const createEventSignups = require('./eventSignups');
 const guildRegistry = require('./guildRegistry');
 
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -19,6 +23,12 @@ const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 // is told so (plan tasks 8 and 9).
 const loaChannelOf = (g) => (g && g.loa_channel_id) || '';
 const announceChannelOf = (g) => (g && g.announce_channel_id) || '';
+// Signups fall back to the announce channel, so a guild that never configures
+// one still gets working posts in the place it already talks about events.
+// Deliberately a guilds column and not an env var: one deployment serves many
+// guilds, and an env fallback would drop every tenant's signups into whichever
+// channel the deployment happened to name (see test/leakAudit.js check 5).
+const signupChannelOf = (g) => (g && g.signup_channel_id) || announceChannelOf(g);
 const adminRolesOf = (g) => (Array.isArray(g && g.admin_role_ids)
   ? g.admin_role_ids.map(String).filter(Boolean) : []);
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -55,6 +65,7 @@ let eliteTimers = null;
 let loa = null;
 let identities = null;
 let attendance = null;
+let signups = null;
 // Kept so handleInteraction can resolve the tenant registry per interaction;
 // the modules above are built once at boot and no longer carry a guild.
 let db = null;
@@ -72,6 +83,7 @@ function wireModules(supabase) {
   identities = supabase ? createIdentities(supabase) : null;
   loa = supabase ? createLoa(supabase, identities) : null;
   attendance = supabase ? createAttendance(supabase) : null;
+  signups = supabase ? createEventSignups(supabase, identities) : null;
 }
 
 function start(supabase) {
@@ -98,6 +110,7 @@ function start(supabase) {
     // /announce has no supabase dependency, so commands are always (re)registered
     // once the bot connects, regardless of which optional modules are configured.
     await registerCommands();
+    startSignupSweep();
   });
 
   client.on('interactionCreate', handleInteraction);
@@ -254,10 +267,13 @@ async function resolveTenant(interaction) {
 async function handleInteraction(interaction) {
   const tenant = await resolveTenant(interaction);
   if (!tenant) {
-    // Autocomplete cannot show an error, so return an empty list; a command
-    // gets a plain explanation. Either way nothing downstream runs unscoped.
+    // Autocomplete cannot show an error, so return an empty list; a command or
+    // a button press gets a plain explanation. Either way nothing downstream
+    // runs unscoped. Buttons are included because a signup post outlives any
+    // one process — the message is still sitting there, and someone clicking it
+    // after a server is deregistered deserves an answer rather than silence.
     if (interaction.isAutocomplete()) return interaction.respond([]).catch(() => {});
-    if (!interaction.isChatInputCommand()) return;
+    if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
     return interaction.reply({
       content: 'This server is not registered with Guild Hall (or its access is suspended).',
       flags: MessageFlags.Ephemeral,
@@ -265,6 +281,7 @@ async function handleInteraction(interaction) {
   }
 
   if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
+  if (interaction.isButton()) return handleButton(interaction);
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === 'elitetimer') return handleReport(interaction);
   if (interaction.commandName === 'elitetimers') return handleList(interaction);
@@ -761,6 +778,319 @@ async function handleAnnounce(interaction) {
   }
 }
 
+// ── EVENT SIGNUPS ─────────────────────────────────────────────────────────
+// One announcement per occurrence, with three buttons, edited in place as
+// people come and go.
+//
+// TWO PROPERTIES THIS SECTION EXISTS TO GUARANTEE:
+//
+// 1. The buttons survive a process restart. Everything needed to act on a
+//    click is in the customId — literally just the occurrence's uuid — so
+//    there is no in-memory collector, no message cache, and no "this
+//    interaction failed" on a post from last week. discord.js's per-message
+//    collectors would have been fewer lines and would have quietly stopped
+//    working at the next deploy, which is the failure nobody notices until an
+//    officer asks why half the guild couldn't sign up.
+//
+// 2. A burst of clicks produces one or two edits, not thirty. See
+//    refreshSignupMessage.
+const ROLE_ORDER = ['Tank', 'DPS', 'Healer'];
+const SIGNUP_ROLE_EMOJI = { Tank: '🛡️', DPS: '⚔️', Healer: '💚' };
+
+// Discord caps an embed field value at 1024 characters. A guild large enough to
+// blow past that on one role column is exactly the guild where losing the tail
+// silently would be worst, so the overflow is counted rather than dropped.
+function nameColumn(list) {
+  if (!list.length) return '—';
+  const lines = list.map((e) => e.display_name || 'Member');
+  let out = '';
+  for (let i = 0; i < lines.length; i++) {
+    const next = out ? `${out}\n${lines[i]}` : lines[i];
+    if (next.length > 980) return `${out}\n…+${lines.length - i} more`;
+    out = next;
+  }
+  return out;
+}
+
+function signupEmbed(guildHall, view) {
+  const unix = Math.floor(new Date(view.starts_at).getTime() / 1000);
+  const cap = view.capacity ? `${view.counts.going}/${view.capacity}` : `${view.counts.going}`;
+  const byRole = Object.fromEntries(ROLE_ORDER.map((r) => [r, view.going.filter((e) => e.role === r)]));
+  const noRole = view.going.filter((e) => !e.role);
+
+  const fields = ROLE_ORDER.map((role) => ({
+    name: `${SIGNUP_ROLE_EMOJI[role]} ${role} (${byRole[role].length})`,
+    value: nameColumn(byRole[role]),
+    inline: true,
+  }));
+
+  // Kept as its own group rather than folded into DPS. These are the people a
+  // party seed would silently drop, and the count is the prompt to go and set
+  // their role — hiding it inside another column hides the problem.
+  if (noRole.length) {
+    fields.push({ name: `• No role on file (${noRole.length})`, value: nameColumn(noRole), inline: false });
+  }
+  if (view.waitlist.length) {
+    fields.push({
+      name: `⏳ Waitlist (${view.waitlist.length})`,
+      value: nameColumn(view.waitlist.map((e, i) => ({ display_name: `${i + 1}. ${e.display_name || 'Member'}` }))),
+      inline: false,
+    });
+  }
+
+  return {
+    title: String(view.title || 'Event').slice(0, 256),
+    // No "declined" count anywhere, on any surface — there is no such record,
+    // and showing "0 declined" would imply there could be.
+    description: `<t:${unix}:F> · <t:${unix}:R>\n**${cap}** signed up`
+      + (view.status === 'closed' ? '\n\n*Signups are closed.*' : ''),
+    color: view.status === 'closed' ? 0x5a5a5e : 0xc9973a,
+    fields,
+    footer: { text: (guildHall && guildHall.house) || 'Guild Hall' },
+  };
+}
+
+// Buttons are STRIPPED once an occurrence closes, not disabled: a greyed-out
+// "I'm in" still reads as a thing you might be able to press, and people do
+// keep pressing it.
+//
+// "Withdraw" is deliberately not "Can't make it". Withdrawing returns you to
+// undecided; it does not file an absence, and a label that says otherwise
+// would have members believing officers had been told something they haven't.
+function signupComponents(view) {
+  if (view.status !== 'open') return [];
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`signup:join:${view.id}`).setLabel("I'm in").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`signup:leave:${view.id}`).setLabel('Withdraw').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`signup:who:${view.id}`).setLabel("Who's coming?").setStyle(ButtonStyle.Secondary),
+  )];
+}
+
+function signupChannel(guildHall) {
+  const channelId = signupChannelOf(guildHall);
+  if (!channelId) return null;
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
+  const channel = guild?.channels.cache.get(channelId);
+  if (!channel?.isTextBased()) {
+    console.error(`Signup post error: channel ${channelId} not found or not text-based (check this guild's signup/announce channel and the bot's permissions).`);
+    return null;
+  }
+  return channel;
+}
+
+// Post the announcement, returning where it landed so the caller can store it.
+// The channel is resolved at post time and then remembered ON THE ROW, so an
+// officer changing the configured channel later moves new signups without
+// orphaning the buttons on posts already out there.
+async function postSignupMessage(guildHall, view) {
+  const channel = signupChannel(guildHall);
+  if (!channel) return null;
+  try {
+    const message = await channel.send({ embeds: [signupEmbed(guildHall, view)], components: signupComponents(view) });
+    return { channelId: channel.id, messageId: message.id };
+  } catch (err) {
+    console.error('Signup post error:', err.message);
+    return null;
+  }
+}
+
+async function deleteSignupMessage(guildHall, channelId, messageId) {
+  if (!messageId || !channelId) return;
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
+  const channel = guild?.channels.cache.get(channelId);
+  if (!channel?.isTextBased()) return;
+  try {
+    await channel.messages.delete(messageId);
+  } catch (err) {
+    // Already deleted by hand, or the bot lost access. Best-effort by design —
+    // the signup record is already gone by the time this runs.
+    console.error('Signup message delete error:', err.message);
+  }
+}
+
+// ── Coalesced edits ─────────────────────────────────────────────────────────
+// Six people clicking "I'm in" during a roll call is six state changes in about
+// two seconds. Editing on each one sends six requests that Discord may deliver
+// out of order, so the message can settle showing an EARLIER state than the
+// truth — the one failure mode that makes the whole feature untrustworthy.
+//
+// So: the first change schedules an edit 1.5 s out, and every change inside
+// that window rides along with it. The state is then re-read from Postgres
+// immediately before the edit, not captured when the timer was set, which is
+// what makes the coalescing safe rather than merely cheap — the edit always
+// paints whatever is true at the moment it fires.
+//
+// Keyed by guild AND occurrence. The uuid alone would do (they're globally
+// unique), but a key without a guild in it is the shape that has gone wrong
+// everywhere else in this codebase, so it doesn't get to be the exception.
+const SIGNUP_EDIT_DEBOUNCE_MS = 1500;
+const signupEditTimers = new Map(); // `${guildId}:${signupId}` -> timeout handle
+
+function refreshSignupMessage(guildHall, signupId) {
+  if (!signups || !guildHall || !signupId) return;
+  const key = `${guildHall.id}:${signupId}`;
+  if (signupEditTimers.has(key)) return; // an edit is already coming; it'll see this change too
+  signupEditTimers.set(key, setTimeout(() => {
+    signupEditTimers.delete(key);
+    editSignupMessage(guildHall, signupId).catch((err) => console.error('Signup edit failed:', err.message));
+  }, SIGNUP_EDIT_DEBOUNCE_MS));
+}
+
+async function editSignupMessage(guildHall, signupId) {
+  // Re-read here, at the last possible moment.
+  const view = await signups.detail(guildHall, signupId).catch(() => null);
+  if (!view || !view.message_id || !view.channel_id) return;
+  const guild = getGuild(guildHall.discord_guild_id);
+  const channel = guild?.channels.cache.get(view.channel_id);
+  if (!channel?.isTextBased()) return;
+  try {
+    const message = await channel.messages.fetch(view.message_id);
+    await message.edit({ embeds: [signupEmbed(guildHall, view)], components: signupComponents(view) });
+  } catch (err) {
+    // A message deleted by hand is the common case. Logged, not repaired: the
+    // officer page has an explicit "Repost" for that, and silently posting a
+    // replacement would leave two live signup posts for one occurrence.
+    console.error('Signup message edit error:', err.message);
+  }
+}
+
+// ── Button handling ───────────────────────────────────────────────────────
+async function handleButton(interaction) {
+  const [ns, action, signupId] = String(interaction.customId || '').split(':');
+  if (ns !== 'signup') return;
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!signups) return interaction.editReply('Signups are not configured right now.');
+  if (!signupId) return interaction.editReply('That button is missing its event — the post may be from an older version.');
+
+  try {
+    if (action === 'who') return await replySignupRoster(interaction, signupId);
+    if (action === 'join') return await handleSignupJoin(interaction, signupId);
+    if (action === 'leave') return await handleSignupLeave(interaction, signupId);
+    return await interaction.editReply('Unknown action.');
+  } catch (err) {
+    console.error('Signup button error:', err.message);
+    await interaction.editReply(err.status ? err.message : 'Something went wrong with that.').catch(() => {});
+  }
+}
+
+async function handleSignupJoin(interaction, signupId) {
+  const { status, position, already } = await signups.join(interaction.guildHall, signupId, {
+    discordId: interaction.user.id,
+    displayName: displayNameFor(interaction.user),
+  });
+  const line = status === 'waitlist'
+    ? `You're on the waitlist — **#${position}**. If a slot frees up you'll be moved in automatically.`
+    : "You're in ✅";
+  await interaction.editReply(already ? `${line} (you were already signed up)` : line);
+  refreshSignupMessage(interaction.guildHall, signupId);
+}
+
+async function handleSignupLeave(interaction, signupId) {
+  const { removed } = await signups.withdraw(interaction.guildHall, signupId, { discordId: interaction.user.id });
+  // The wording matters as much as the data model does. Withdrawing puts a
+  // member back to undecided; if they actually can't come, that's an LOA, and
+  // this is the one moment they're guaranteed to be reading a message about it.
+  await interaction.editReply(removed
+    ? "Withdrawn — you're back to undecided. If you know you can't make it, file an LOA with `/loa` so officers can plan around it."
+    : "You weren't signed up for this one.");
+  if (removed) refreshSignupMessage(interaction.guildHall, signupId);
+}
+
+async function replySignupRoster(interaction, signupId) {
+  const view = await signups.detail(interaction.guildHall, signupId);
+  const c = view.composition;
+  const group = (label, list) => (list.length ? `**${label} (${list.length})**\n${list.map((e) => e.display_name || 'Member').join(', ')}` : null);
+  const lines = [
+    `**${view.title}** — ${c.total} signed up${view.capacity ? ` of ${view.capacity}` : ''}`,
+    `🛡️ ${c.Tank} · ⚔️ ${c.DPS} · 💚 ${c.Healer}${c.unknown ? ` · • ${c.unknown} with no role on file` : ''}`,
+    '',
+    ...ROLE_ORDER.map((r) => group(r, view.going.filter((e) => e.role === r))),
+    group('No role on file', view.going.filter((e) => !e.role)),
+    group('Waitlist', view.waitlist),
+  ].filter((l) => l !== null);
+  const text = lines.join('\n');
+  await interaction.editReply(text.length > 1900 ? `${text.slice(0, 1900)}…` : text);
+}
+
+// ── Reminders ─────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Discord opens a fresh DM channel per recipient, and a guild-wide fan-out in a
+// tight loop trips a GLOBAL 429 — which doesn't just fail the remaining DMs, it
+// throttles every other request this bot makes, including the slash commands
+// people are using at the same moment. 250 ms between sends keeps a 60-member
+// batch under a minute and well inside the limits.
+const DM_PACING_MS = 250;
+
+async function sendSignupReminders(guildHall, signup, recipients) {
+  if (!ready || !client || !recipients?.length) return;
+  const unix = Math.floor(new Date(signup.starts_at).getTime() / 1000);
+  const text = `⏰ **${signup.title}** starts <t:${unix}:R> (<t:${unix}:t>) and we haven't heard from you.\n`
+    + 'Hit **I\'m in** on the signup post if you\'re coming — or file an LOA with `/loa` if you\'re not.';
+  let sent = 0;
+  for (const m of recipients) {
+    try {
+      const user = await client.users.fetch(m.id);
+      await user.send(text);
+      sent += 1;
+    } catch (err) {
+      // DMs closed, or they've left the server. Skipped, never retried — a
+      // member who has turned off DMs is not an error condition.
+      console.error(`Signup reminder DM error for ${m.id}:`, err.message);
+    }
+    await sleep(DM_PACING_MS);
+  }
+  console.log(`Signup reminders for "${signup.title}": ${sent}/${recipients.length} delivered.`);
+}
+
+// ── The 60-second sweep ───────────────────────────────────────────────────
+// Sends due reminders and closes finished occurrences. Both halves are driven
+// by single UPDATE … RETURNING statements in Postgres, so this loop holds no
+// state of its own and a second process running the same sweep is harmless:
+// whichever one wins the conditional update does the work, and the other gets
+// an empty list.
+const SIGNUP_SWEEP_MS = 60 * 1000;
+let signupSweepTimer = null;
+
+function startSignupSweep() {
+  if (signupSweepTimer || !db) return;
+  signupSweepTimer = setInterval(() => {
+    runSignupSweep().catch((err) => console.error('Signup sweep error:', err.message));
+  }, SIGNUP_SWEEP_MS);
+}
+
+// Resolve a row's OWN guild. The sweep is cross-tenant by nature — one process
+// serves every guild — so each row's guild_id is the only correct source, and
+// falling back to anything would post one guild's reminders into another's.
+const guildFor = (guildId) => guildRegistry.resolveById(db, guildId);
+
+async function runSignupSweep() {
+  if (!ready || !signups || !db) return;
+
+  // Reminders first. The claim already happened inside the RPC — every row
+  // handed back here has been won exclusively by this process, so a crash
+  // between here and the DM loses that batch rather than duplicating it.
+  // That's the right way round: a missed nudge is a nudge; a duplicate batch
+  // is the bot DMing the whole guild twice.
+  for (const row of await createEventSignups.claimDueReminders(db)) {
+    const guildHall = await guildFor(row.guild_id);
+    if (!guildHall) continue; // deregistered or suspended since the row was written
+    try {
+      const recipients = await signups.reminderRecipients(guildHall, row);
+      await sendSignupReminders(guildHall, row, recipients);
+    } catch (err) {
+      console.error('Signup reminder batch failed:', err.message);
+    }
+  }
+
+  // Then close anything that has started, and strip its buttons.
+  for (const row of await createEventSignups.closeFinished(db)) {
+    const guildHall = await guildFor(row.guild_id);
+    if (!guildHall) continue;
+    editSignupMessage(guildHall, row.id).catch((err) => console.error('Signup close edit failed:', err.message));
+  }
+}
+
 // DMs each attendee a simple confirmation that their attendance was logged.
 // Best-effort per member — a member with DMs from server members disabled (or
 // who has left the guild) just gets logged and skipped, not surfaced as a
@@ -806,7 +1136,10 @@ function getVoiceMembers(guildHall, channelId) {
   }));
 }
 
-module.exports = { start, listVoiceChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry };
+module.exports = {
+  start, listVoiceChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
+  postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
+};
 
 // ── Test seam ───────────────────────────────────────────────────────────────
 // The interaction path is the highest-risk code in this project (plan task 12):
@@ -827,4 +1160,11 @@ module.exports.__test = {
   handleInteraction,
   isAdminMember,
   getGuild,
+  // Signup buttons are the same risk in a different shape: a click carries no
+  // guild, only an occurrence id, so tenant resolution has to happen before the
+  // id is trusted. Exposed so that path can be exercised too.
+  handleButton,
+  signupEmbed,
+  signupComponents,
+  runSignupSweep,
 };

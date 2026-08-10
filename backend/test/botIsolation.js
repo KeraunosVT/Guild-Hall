@@ -59,16 +59,22 @@ function makeFakeClient(guilds) {
 }
 
 // ── Fake interaction ────────────────────────────────────────────────────────
-function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = USER }) {
+// `customId` makes it a BUTTON press instead of a slash command — that's what
+// a signup post's "I'm in" arrives as, and it carries no guild of its own
+// beyond interaction.guildId, so it has to go through the same tenant
+// resolution every command does.
+function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = USER, customId = null }) {
   const replies = [];
   const roleSet = new Set(roles);
   return {
     guildId: String(guildId),
     commandName: command,
+    customId,
     user,
     member: { roles: { cache: { has: (r) => roleSet.has(r) } } },
     isAutocomplete: () => false,
-    isChatInputCommand: () => true,
+    isButton: () => Boolean(customId),
+    isChatInputCommand: () => !customId,
     options: {
       getSubcommand: () => sub,
       getString: (n) => (opts[n] === undefined ? null : String(opts[n])),
@@ -102,7 +108,7 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
   const stale = (await s.from('guilds').select('id').in('discord_guild_id', FIXTURE_IDS)).data || [];
   if (stale.length) {
     const ids = stale.map((r) => r.id);
-    for (const t of ['elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', ids);
+    for (const t of ['event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', ids);
     await s.from('guilds').delete().in('id', ids);
   }
 
@@ -206,8 +212,47 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
   check('same role in B was refused (not an officer there)',
     sent.length === 0 && /officers only/i.test(i.replies[0] || ''), i.replies[0] || '');
 
+  // ── 8. Signup buttons ─────────────────────────────────────────────────────
+  // The riskiest interaction in the project: a button carries nothing but an
+  // occurrence uuid in its customId, and that uuid is public to anyone who can
+  // read the message. If the id alone were enough to act on, a member of one
+  // server could sign themselves into another server's raid by pressing a
+  // button copied out of a post they don't belong to.
+  console.log('\n8. signup buttons');
+  const mkSignup = async (guildRow, mark) => (await s.from('event_signups').insert({
+    guild_id: guildRow.id, title: `${mark} Raid`, starts_at: '2099-01-15T21:00:00Z',
+    event_date: '2099-01-15', status: 'open',
+  }).select('*').single()).data;
+  const sgA = await mkSignup(rowA, 'A');
+  const sgB = await mkSignup(rowB, 'B');
+
+  i = await run(makeInteraction({ guildId: rowA.discord_guild_id, customId: `signup:join:${sgA.id}` }));
+  const eA = await rows('event_signup_entries', rowA.id);
+  check('joining from your own server works', eA.length === 1 && eA[0].signup_id === sgA.id,
+    `${eA.length} entries · ${i.replies[0] || '(no reply)'}`);
+
+  // Guild A's member presses a button whose id belongs to guild B.
+  i = await run(makeInteraction({ guildId: rowA.discord_guild_id, customId: `signup:join:${sgB.id}` }));
+  const eB = await rows('event_signup_entries', rowB.id);
+  check('B\'s occurrence id is not reachable from A', eB.length === 0,
+    `${eB.length} entries in B · ${i.replies[0] || ''}`);
+
+  // And from an unregistered server, where tenant resolution has nothing to
+  // resolve — the click must be refused before the id is trusted at all.
+  i = await run(makeInteraction({ guildId: '600000000000009999', customId: `signup:join:${sgA.id}` }));
+  const stillOne = await rows('event_signup_entries', rowA.id);
+  check('unregistered server cannot press A\'s button', stillOne.length === 1,
+    `${stillOne.length} entries · ${i.replies[0] || ''}`);
+
+  // Withdrawing returns you to undecided, which means the row is GONE — not
+  // flipped to a "declined" state, which the schema refuses to store.
+  await run(makeInteraction({ guildId: rowA.discord_guild_id, customId: `signup:leave:${sgA.id}` }));
+  const afterLeave = await rows('event_signup_entries', rowA.id);
+  check('withdrawing removes the row rather than recording a decline', afterLeave.length === 0,
+    `${afterLeave.length} entries`);
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
-  for (const t of ['elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', [rowA.id, rowB.id]);
+  for (const t of ['event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', [rowA.id, rowB.id]);
   await s.from('guilds').delete().in('id', [rowA.id, rowB.id]);
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -50,6 +50,10 @@ const guild = {
   roster_channel_id: String(flag('roster-channel') || input.roster_channel_id || '').trim(),
   loa_channel_id: String(flag('loa-channel') || input.loa_channel_id || '').trim(),
   announce_channel_id: String(flag('announce-channel') || input.announce_channel_id || '').trim(),
+  // Optional, unlike the three above: blank means signup posts go to the
+  // announce channel, which is where a guild already talks about events. It is
+  // only worth setting when signups deserve a room of their own.
+  signup_channel_id: String(flag('signup-channel') || input.signup_channel_id || '').trim() || null,
   status: 'active',
 };
 
@@ -82,7 +86,7 @@ for (const f of ['admin_role_ids', 'allowed_role_ids', 'member_role_ids']) {
   const bad = guild[f].filter((id) => !snowflake.test(id));
   if (bad.length) problems.push(`${f}: not Discord ids — ${bad.join(', ')}`);
 }
-for (const f of ['roster_channel_id', 'loa_channel_id', 'announce_channel_id']) {
+for (const f of ['roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id']) {
   if (guild[f] && !snowflake.test(guild[f])) problems.push(`${f}: not a Discord id — ${guild[f]}`);
 }
 

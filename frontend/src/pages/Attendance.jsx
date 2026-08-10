@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '../auth';
-import { RefreshCw, Camera, Trash2, ChevronDown, Users, CalendarDays, Loader2, ArrowUp, ArrowDown, BarChart3, Wand2 } from 'lucide-react';
+import { RefreshCw, Camera, Trash2, ChevronDown, Users, CalendarDays, Loader2, ArrowUp, ArrowDown, BarChart3, Wand2, CalendarCheck, UserPlus } from 'lucide-react';
 import { fmtTimeEst, guildDayOfWeek, isAfterMidnight } from '../timeUtils';
 import RestrictedGate from '../components/ui/RestrictedGate';
 
@@ -171,8 +171,17 @@ export default function Attendance() {
     try {
       const res = await axios.get(`/api/admin/events/${id}`);
       // absences is best-effort server-side (needs a dated event and Discord),
-      // so it may be null even when attendees loaded fine.
-      setDetail((d) => ({ ...d, [id]: { attendees: res.data.attendees || [], absences: res.data.absences || null } }));
+      // so it may be null even when attendees loaded fine. `signup` is null
+      // whenever nobody opened signups for that occurrence, which is most of
+      // the historical log — the section simply doesn't render.
+      setDetail((d) => ({
+        ...d,
+        [id]: {
+          attendees: res.data.attendees || [],
+          absences: res.data.absences || null,
+          signup: res.data.signup || null,
+        },
+      }));
     } catch {
       flash('Could not load attendees.', false);
       setExpanded(null);
@@ -330,6 +339,12 @@ export default function Attendance() {
                 const info = detail[ev.id];
                 const attendees = info?.attendees;
                 const absences = info?.absences;
+                const signup = info?.signup;
+                // Turned up without signing up. Marked on the attendee chip
+                // rather than pulled into a group of its own — they came, which
+                // is the thing that matters; the marker only shows how much of
+                // the turnout the signup list actually predicted.
+                const walkIns = new Set(signup?.walkIns || []);
                 return (
                   <div key={ev.id}>
                     <button
@@ -368,9 +383,47 @@ export default function Attendance() {
                             ) : (
                               <NameGroup label={`Attended (${attendees.length})`} tone="text-ash">
                                 {attendees.map((a) => (
-                                  <NameChip key={a.id}>{a.display_name}</NameChip>
+                                  <NameChip key={a.id}
+                                    title={walkIns.has(a.discord_id) ? 'Walk-in — turned up without signing up' : undefined}
+                                    className={walkIns.has(a.discord_id) ? 'border-line text-ash' : ''}>
+                                    {a.display_name}
+                                    {walkIns.has(a.discord_id) && <UserPlus className="w-3 h-3 text-brass/70" />}
+                                  </NameChip>
                                 ))}
                               </NameGroup>
+                            )}
+
+                            {/* Ranked above the generic no-LOA group below,
+                                because it's a stronger signal: someone who never
+                                answered may not have seen the post, where
+                                someone who clicked "I'm in" made a commitment.
+                                This is the whole payoff of keeping signups and
+                                attendance as two records that get joined rather
+                                than one that gets overwritten. */}
+                            {signup?.signedUpNoShow?.length > 0 && (
+                              <NameGroup
+                                label={`Signed up, didn't show (${signup.signedUpNoShow.length})`}
+                                tone="text-oxblood"
+                              >
+                                {signup.signedUpNoShow.map((m) => (
+                                  <NameChip key={m.discord_id} className="border-oxblood/60 text-bone"
+                                    title={m.loa ? `Filed an LOA after signing up — ${loaReason(m.loa)}` : 'Declared attendance but was not in the channel'}>
+                                    {m.display_name}
+                                    {m.loa && <span className="text-brass text-[10px]">LOA</span>}
+                                  </NameChip>
+                                ))}
+                              </NameGroup>
+                            )}
+
+                            {signup && (
+                              <div className="flex items-center gap-2 text-xs text-ash">
+                                <CalendarCheck className="w-3.5 h-3.5 text-brass" />
+                                <span>
+                                  {signup.counts.going} signed up{signup.capacity ? ` of ${signup.capacity}` : ''}
+                                  {' · '}{attendees.length - walkIns.size} of them turned up
+                                  {walkIns.size > 0 && ` · ${walkIns.size} walk-in${walkIns.size === 1 ? '' : 's'}`}
+                                </span>
+                              </div>
                             )}
 
                             {/* Absences are only computable for a dated event,

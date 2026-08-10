@@ -12,7 +12,7 @@ import RestrictedGate from '../components/ui/RestrictedGate';
 import Button from '../components/ui/Button';
 import { PageShell } from '../components/ui/PageShell';
 import { todayInGuildTz, fmtTimeEst, eventsForGuildDay, isAfterMidnight } from '../timeUtils';
-import { Save, Trash2, Send, Plus, Copy, RefreshCw, Users, CalendarOff, CalendarDays, CalendarCheck, X } from 'lucide-react';
+import { Save, Trash2, Send, Plus, Copy, RefreshCw, Users, CalendarOff, CalendarDays, CalendarCheck, X, Check, Wand2, HelpCircle } from 'lucide-react';
 
 const ROLES = ['Tank', 'DPS', 'Healer'];
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -280,6 +280,11 @@ export default function Parties() {
   const [schedule, setSchedule] = useState([]);
   const [classMode, setClassMode] = useState('pvp');
   const [classAssignments, setClassAssignments] = useState({ pvp: {}, pve: {} });
+  // Who declared they're coming to the occasion the board is set to, or null if
+  // no signup was opened for it. Read-only here: this page can seed from the
+  // list but never writes to it, so a roster decision can't silently change
+  // what a member said about their own evening.
+  const [signup, setSignup] = useState(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -362,6 +367,24 @@ export default function Parties() {
       .catch(() => new Map());
   };
 
+  // Same (date, event) pair the LOA feed is fetched with, so the two always
+  // describe the same night. Failure is silent and resolves to "no signup for
+  // this occasion" — a builder that can't load an optional feed should still
+  // build rosters.
+  const fetchSignup = (date, event) => {
+    const params = `date=${date}${event ? `&event=${event}` : ''}`;
+    return axios.get(`/api/admin/signups?${params}`)
+      .then((res) => res.data.signup || null)
+      .catch(() => null);
+  };
+
+  // discord_id -> 'going' | 'waitlist', for the badges on member cards.
+  const signupById = useMemo(() => {
+    const m = new Map();
+    (signup?.entries || []).forEach((e) => m.set(String(e.discord_id), e.status));
+    return m;
+  }, [signup]);
+
   const eventsForDate = useMemo(() => {
     if (!loaDate) return [];
     return eventsForGuildDay(schedule, new Date(loaDate + 'T12:00:00').getDay());
@@ -378,6 +401,7 @@ export default function Parties() {
   useEffect(() => {
     loadSaved(); loadSchedule();
     loaFetchedFor.current = `${loaDate}|${loaEvent}`;
+    fetchSignup(loaDate, loaEvent).then(setSignup);
     fetchLoa(loaDate, loaEvent).then((s) => { setLoaById(s); loaRef.current = s; loadMembers(); });
   }, []);
 
@@ -386,6 +410,7 @@ export default function Parties() {
     if (loaFetchedFor.current === key) return;
     loaFetchedFor.current = key;
     fetchLoa(loaDate, loaEvent).then(setLoaById);
+    fetchSignup(loaDate, loaEvent).then(setSignup);
   }, [loaDate, loaEvent]);
 
   // Moving the occasion changes who's flagged, but never moves anyone: the
@@ -581,6 +606,64 @@ export default function Parties() {
     flash(`Moved ${moving.length} member${moving.length === 1 ? '' : 's'} to Absent.`);
   };
 
+  // Build parties from who actually said they're coming: 1 tank, 1 healer and
+  // 4 DPS per party, filled in order until the signup list runs out.
+  //
+  // Explicitly a BUTTON, never automatic. Everything else on this page that
+  // could rearrange the board asks first (see the LOA conflict bar), because an
+  // officer part-way through building a roster having it silently rewritten
+  // underneath them loses real work. This follows the same rule.
+  //
+  // Three placements worth spelling out:
+  //   · the waitlist goes to Fill — they're coming if a slot opens, so they
+  //     belong on the board, but not in a party someone confirmed is theirs;
+  //   · signups with no role on file go to the Unassigned pool rather than
+  //     being dropped, which is the whole reason the composition banner counts
+  //     them separately;
+  //   · NOBODY is put in Absent. Not signing up isn't declining, and moving
+  //     someone to Absent for it would encode exactly the inference this
+  //     feature refuses to make.
+  const seedFromSignup = () => {
+    if (!signup) return;
+    const parked = new Set(items.absent); // deliberate benches survive a seed
+    const going = signup.going.map((e) => String(e.discord_id)).filter((id) => byId[id] && !parked.has(id));
+    const waiting = signup.waitlist.map((e) => String(e.discord_id)).filter((id) => byId[id] && !parked.has(id));
+
+    const queues = { Tank: [], Healer: [], DPS: [], none: [] };
+    going.forEach((id) => { (queues[roles[id]] || queues.none).push(id); });
+
+    const next = initItems();
+    next.absent = [...items.absent];
+
+    const seedable = PARTY_IDS.filter((pid) => pid !== FILL_PARTY_ID);
+    let used = 0;
+    seedable.forEach((pid) => {
+      const party = [];
+      if (queues.Tank.length) party.push(queues.Tank.shift());
+      if (queues.Healer.length) party.push(queues.Healer.shift());
+      while (party.length < PARTY_SIZE && queues.DPS.length) party.push(queues.DPS.shift());
+      next[pid] = party;
+      used += party.length;
+    });
+
+    next[FILL_PARTY_ID] = waiting.slice(0, PARTY_SIZE);
+    // More waitlisted than the Fill group holds is a good problem; the overflow
+    // stays in the pools rather than being hidden.
+    const overflow = waiting.slice(PARTY_SIZE);
+
+    // Everyone the seed didn't place — members who never signed up, leftovers
+    // once the parties filled, and the no-role group — goes back to the pool
+    // for their role, exactly where an officer would look for them.
+    const placed = new Set([...PARTY_IDS.flatMap((pid) => next[pid]), ...next.absent]);
+    members.forEach((m) => { if (!placed.has(m.id)) next[poolForRole(roles[m.id])].push(m.id); });
+    overflow.forEach((id) => { if (!placed.has(id) && !members.find((m) => m.id === id)) next[poolForRole(roles[id])].push(id); });
+
+    setItems(next);
+    flash(`Seeded ${used} member${used === 1 ? '' : 's'} into parties`
+      + `${waiting.length ? `, ${Math.min(waiting.length, PARTY_SIZE)} waitlisted into Fill` : ''}`
+      + `${queues.none.length ? ` — ${queues.none.length} signed up with no role on file, left in Unassigned` : ''}.`);
+  };
+
   // Click a party member to send them back to the pool for their role — the
   // reverse of dragging them in, without the drag. Fired only for pointer
   // travel under the sensor's own activation threshold (see MemberCardBase),
@@ -732,6 +815,10 @@ export default function Parties() {
       if (date) {
         loaFetchedFor.current = `${date}|${event}`;
         setLoaDate(date); setLoaEvent(event); setLoaById(loa);
+        // The occasion moved with the roster, so the signup feed has to follow
+        // it. Fetched here rather than left to the date effect, which is
+        // suppressed by loaFetchedFor above to avoid a duplicate LOA round trip.
+        fetchSignup(date, event).then(setSignup);
       }
       setLoaDiff(date && nowOut.length ? { nowOut } : null);
       flash(`Loaded "${r.name}".`);
@@ -818,6 +905,39 @@ export default function Parties() {
 
       {msg && (
         <div className={`mb-6 px-5 py-3 rounded-lg border text-sm ${msg.ok ? 'border-brass/40 bg-panel text-bone' : 'border-oxblood/50 bg-oxblooddeep/20 text-bone'}`}>{msg.text}</div>
+      )}
+
+      {/* Who declared they're coming, and what shape that group is. The "no role
+          on file" count is separate from the three roles on purpose: those are
+          the members a seed can't place, and folding them into DPS would hide
+          the one number an officer can act on before the event starts. */}
+      {signup && (
+        <div className="mb-3 px-5 py-3 rounded-lg border border-brass/30 bg-panel text-sm flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <CalendarCheck className="w-4 h-4 text-brass shrink-0" />
+            <span className="text-bone">
+              <span className="font-semibold">{signup.title}</span>
+              <span className="text-ash"> — {signup.counts.going} signed up
+                {signup.capacity ? ` of ${signup.capacity}` : ''}
+                {signup.counts.waitlist ? `, ${signup.counts.waitlist} waitlisted` : ''}</span>
+            </span>
+            <span className="flex items-center gap-3 font-mono text-xs">
+              <span className="text-sky-400">{signup.composition.Tank} T</span>
+              <span className="text-oxblood">{signup.composition.DPS} D</span>
+              <span className="text-emerald-400">{signup.composition.Healer} H</span>
+              {signup.composition.unknown > 0 && (
+                <span className="text-brass inline-flex items-center gap-1"
+                  title="Signed up but no role on file — a seed can't place these, so they land in Unassigned">
+                  <HelpCircle className="w-3.5 h-3.5" /> {signup.composition.unknown} no role
+                </span>
+              )}
+            </span>
+          </div>
+          <Button variant="secondary" size="none" className="px-3 py-1.5 text-xs shrink-0" onClick={seedFromSignup}
+            title="Rebuild the parties from the signup list — 1 tank, 1 healer, 4 DPS each. Nobody is moved to Absent.">
+            <Wand2 className="w-3.5 h-3.5" /> Seed parties
+          </Button>
+        </div>
       )}
 
       {/* Which parties lost someone since this roster was saved. Informational
@@ -924,7 +1044,7 @@ export default function Parties() {
                     <div className="space-y-1 max-h-[340px] overflow-auto pr-1 min-h-[50px]">
                       {poolViews[key].length === 0
                         ? <div className="text-ash/50 text-xs py-4 text-center">Empty</div>
-                        : poolViews[key].map((id) => <SortableMember key={id} member={byId[id] || { id, name: 'Unknown' }} role={roles[id]} onRole={setRole} loa={loaById.get(id)} classMode={classMode} assignedClass={classAssignments[classMode][id]} onClassChange={(cls) => setMemberClass(classMode, id, cls)} />)}
+                        : poolViews[key].map((id) => <SortableMember key={id} member={byId[id] || { id, name: 'Unknown' }} role={roles[id]} onRole={setRole} loa={loaById.get(id)} signup={signupById.get(id)} classMode={classMode} assignedClass={classAssignments[classMode][id]} onClassChange={(cls) => setMemberClass(classMode, id, cls)} />)}
                     </div>
                   </DroppableColumn>
                 ))}
@@ -946,7 +1066,7 @@ export default function Parties() {
                     <div className="space-y-1">
                       {items[pid].length === 0
                         ? <div className="text-ash/50 text-xs text-center py-3 border border-dashed border-line rounded">Drop members here</div>
-                        : items[pid].map((id) => <SortableMember key={id} member={byId[id] || { id, name: 'Unknown' }} role={roles[id]} onRole={setRole} inParty loa={loaById.get(id)} classMode={classMode} assignedClass={classAssignments[classMode][id]} onClassChange={(cls) => setMemberClass(classMode, id, cls)} onQuickMove={returnToPool} />)}
+                        : items[pid].map((id) => <SortableMember key={id} member={byId[id] || { id, name: 'Unknown' }} role={roles[id]} onRole={setRole} inParty loa={loaById.get(id)} signup={signupById.get(id)} classMode={classMode} assignedClass={classAssignments[classMode][id]} onClassChange={(cls) => setMemberClass(classMode, id, cls)} onQuickMove={returnToPool} />)}
                     </div>
                   </DroppableColumn>
                 ))}
@@ -965,14 +1085,14 @@ export default function Parties() {
                 <div className="text-ash/50 text-xs text-center py-4 border border-dashed border-line rounded">Drop absent members here</div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 max-h-[320px] overflow-auto pr-1">
-                  {items.absent.map((id) => <SortableMember key={id} member={byId[id] || { id, name: 'Unknown' }} role={roles[id]} onRole={setRole} loa={loaById.get(id)} classMode={classMode} assignedClass={classAssignments[classMode][id]} onClassChange={(cls) => setMemberClass(classMode, id, cls)} />)}
+                  {items.absent.map((id) => <SortableMember key={id} member={byId[id] || { id, name: 'Unknown' }} role={roles[id]} onRole={setRole} loa={loaById.get(id)} signup={signupById.get(id)} classMode={classMode} assignedClass={classAssignments[classMode][id]} onClassChange={(cls) => setMemberClass(classMode, id, cls)} />)}
                 </div>
               )}
             </DroppableColumn>
           </div>
         </div>
 
-        <DragOverlay>{activeMember ? <MemberCardBase member={activeMember} role={roles[activeMember.id]} loa={loaById.get(activeMember.id)} overlay /> : null}</DragOverlay>
+        <DragOverlay>{activeMember ? <MemberCardBase member={activeMember} role={roles[activeMember.id]} loa={loaById.get(activeMember.id)} signup={signupById.get(activeMember.id)} overlay /> : null}</DragOverlay>
       </DndContext>
     </PageShell>
   );
@@ -1004,7 +1124,7 @@ function SortableMember(props) {
 // activated, so a click handler here cannot collide with a drag.
 const CLICK_SLOP_PX = 5;
 
-const MemberCardBase = forwardRef(function MemberCardBase({ member, role, onRole, inParty, overlay, style, handle, isDragging, loa, classMode, assignedClass, onClassChange, onQuickMove }, ref) {
+const MemberCardBase = forwardRef(function MemberCardBase({ member, role, onRole, inParty, overlay, style, handle, isDragging, loa, signup, classMode, assignedClass, onClassChange, onQuickMove }, ref) {
   const rs = ROLE_STYLE[role];
   const classes = ((classMode === 'pve' ? member.pve_classes : member.pvp_classes) || []).filter(Boolean);
   const current = assignedClass || classes[0];
@@ -1013,8 +1133,12 @@ const MemberCardBase = forwardRef(function MemberCardBase({ member, role, onRole
   // difference is the whole point of showing the window.
   const partial = Boolean(loa?.partial);
   const loaTitle = loaSummary(loa);
+  // Only positive standings exist, so there is no "declined" badge to render —
+  // no badge means the member hasn't answered, which is not the same thing and
+  // is never drawn as though it were.
+  const signupTitle = signup === 'going' ? 'Signed up' : signup === 'waitlist' ? 'Signed up — on the waitlist' : null;
   const hint = onQuickMove ? 'Click to send back to the pool' : null;
-  const title = [loaTitle, hint].filter(Boolean).join(' · ') || undefined;
+  const title = [loaTitle, signupTitle, hint].filter(Boolean).join(' · ') || undefined;
 
   // Where the pointer went down, to measure travel on release. Nested controls
   // (role buttons, the class select) stop pointerdown from reaching here, so
@@ -1062,6 +1186,14 @@ const MemberCardBase = forwardRef(function MemberCardBase({ member, role, onRole
           </select>
         )}
       </div>
+      {signup && (
+        <span title={signupTitle}
+          className={`shrink-0 ${signup === 'waitlist' ? 'text-brass' : 'text-emerald-400'}`}>
+          {signup === 'waitlist'
+            ? <span className="font-mono text-[10px]">WL</span>
+            : <Check className="w-3.5 h-3.5" />}
+        </span>
+      )}
       {loa && <CalendarOff className={`w-3.5 h-3.5 shrink-0 ${partial ? 'text-brass' : 'text-oxblood'}`} />}
       {onRole && (
         <div className="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity" onPointerDown={(e) => e.stopPropagation()}>

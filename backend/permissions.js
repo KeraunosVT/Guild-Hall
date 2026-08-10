@@ -54,6 +54,14 @@ const ROUTE_PERMISSIONS = [
   // '/'-separated prefix, so a hyphen doesn't count. That strictness is what
   // stops '/events' swallowing '/event-schedule', and it needs its own rule here.
   { prefix: '/attendance-stats', permission: 'attendance' },
+  // The party builder's read-only signup feed, and ONLY that — every signup
+  // write lives at /api/signups and is gated inline on 'attendance' (see the
+  // note in server.js on why no new permission key was added).
+  //
+  // It takes 'parties', not 'attendance', because it is consumed by the roster
+  // board: an officer granted parties alone would otherwise 403 on their own
+  // page, on a request they never made explicitly.
+  { prefix: '/signups', permission: 'parties' },
   { prefix: '/gear-ilvl', permission: 'gear' },
   { prefix: '/identities', permission: 'names' },
   { prefix: '/unmapped-names', permission: 'names' },
