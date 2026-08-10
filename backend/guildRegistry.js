@@ -32,7 +32,13 @@ const COLUMNS = [
   // the row, just never selected.
   'motto', 'creed',
   'admin_role_ids', 'allowed_role_ids', 'member_role_ids',
-  'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'status',
+  // Every channel the bot posts to. A column added to `guilds` but forgotten
+  // HERE does not error — it arrives as undefined on every resolved row, so the
+  // feature reading it silently behaves as if it were never configured. That is
+  // what happened to signup_channel_id: posts fell back to the announce channel
+  // no matter what was set, and the settings form would then have saved that
+  // undefined back over the real value.
+  'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id', 'status',
 ].join(', ');
 
 async function resolveByDiscordId(supabase, discordGuildId) {

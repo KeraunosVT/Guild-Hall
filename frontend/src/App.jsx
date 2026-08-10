@@ -30,6 +30,7 @@ import Classes from './pages/Classes';
 import GearLevel from './pages/GearLevel';
 import GearLevels from './pages/GearLevels';
 import AuditLog from './pages/AuditLog';
+import GuildSettings from './pages/GuildSettings';
 
 function Layout() {
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
@@ -137,6 +138,7 @@ function Gate() {
           <Route path="/admin/gear-levels" element={<GearLevels />} />
           <Route path="/admin/permissions" element={<Permissions />} />
           <Route path="/admin/audit-log" element={<AuditLog />} />
+          <Route path="/admin/settings" element={<GuildSettings />} />
           {/* Legacy aliases kept so old links still resolve */}
           <Route path="/dashboard" element={<MatchStats />} />
           <Route path="/match-stats" element={<MatchStats />} />

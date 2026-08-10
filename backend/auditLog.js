@@ -31,6 +31,10 @@ const FEATURE_PREFIXES = [
   { prefix: '/gear-ilvl', label: 'Gear Levels' },
   { prefix: '/event-schedule', label: 'LOA Schedule' },
   { prefix: '/members', label: 'Members' },
+  // Its own category rather than folded into anything: these writes change who
+  // can sign in and which channels the bot posts to, and "who changed the
+  // officer roles, and when" is the first question after a lockout.
+  { prefix: '/settings', label: 'Guild Settings' },
 ];
 
 function featureFor(path) {

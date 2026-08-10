@@ -46,6 +46,9 @@ export const adminLinks = [
   { to: '/admin/gear-levels', label: 'Gear Levels', icon: Gauge, perm: 'gear' },
   { to: '/admin/permissions', label: 'Permissions', icon: ShieldCheck, perm: 'permissions' },
   { to: '/admin/audit-log', label: 'Audit Log', icon: ScrollText, perm: 'audit' },
+  // Last in the section: it is the least-used page and the one with the widest
+  // consequences, so it shouldn't sit next to the things officers click daily.
+  { to: '/admin/settings', label: 'Guild Settings', icon: Settings, perm: 'settings' },
 ];
 
 // Loot History reads gear awards and currency side by side, so any loot

@@ -1119,6 +1119,19 @@ function listVoiceChannels(guildHall) {
     .map((ch) => ({ id: ch.id, name: ch.name, memberCount: ch.members.size }));
 }
 
+// Text channels the bot can see, for the settings page's channel pickers —
+// typing a raw snowflake into a form is how a guild's LOA posts end up in a
+// channel nobody reads. Announcement channels are included because plenty of
+// guilds post events into one.
+function listTextChannels(guildHall) {
+  const guild = getGuild(guildHall && guildHall.discord_guild_id);
+  if (!guild) return [];
+  return guild.channels.cache
+    .filter((ch) => ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildAnnouncement)
+    .sort((a, b) => a.rawPosition - b.rawPosition)
+    .map((ch) => ({ id: ch.id, name: ch.name }));
+}
+
 // Snap the current members in a voice channel.
 function getVoiceMembers(guildHall, channelId) {
   const guild = getGuild(guildHall && guildHall.discord_guild_id);
@@ -1137,7 +1150,7 @@ function getVoiceMembers(guildHall, channelId) {
 }
 
 module.exports = {
-  start, listVoiceChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
+  start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
 };
 

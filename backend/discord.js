@@ -55,7 +55,7 @@ const CACHE_TTL_MS = (parseInt(process.env.MEMBER_CACHE_SECONDS, 10) || 60) * 10
 function makeCache(label) {
   const entries = new Map(); // guildId -> { value, at, inFlight }
 
-  return function cached(guildId, fetcher) {
+  function cached(guildId, fetcher) {
     let e = entries.get(guildId);
     if (!e) { e = { value: null, at: 0, inFlight: null }; entries.set(guildId, e); }
 
@@ -74,11 +74,27 @@ function makeCache(label) {
       .finally(() => { e.inFlight = null; });
 
     return e.inFlight;
-  };
+  }
+
+  // Drop one guild's entry. Only the guild that changed pays the reload —
+  // clearing every tenant because one edited its settings would be a
+  // self-inflicted thundering herd, same reasoning as permissions.invalidate().
+  cached.forget = (guildId) => { entries.delete(guildId); };
+  return cached;
 }
 
 const membersCache = makeCache('listMembers');
 const rolesCache = makeCache('listRoles');
+
+// Call after a guild's Discord wiring changes. member_role_ids decides who is
+// even IN listMembers' result, so without this a settings save appears to do
+// nothing for up to a minute and the officer saves again.
+function invalidateGuild(guild) {
+  const id = guildIdOf(guild);
+  if (!id) return;
+  membersCache.forget(id);
+  rolesCache.forget(id);
+}
 
 // ── Members ─────────────────────────────────────────────────────────────────
 // Every member of the guild (paginated), keeping those with a member role.
@@ -190,4 +206,4 @@ async function postImage(guild, buffer, filename, content) {
   );
 }
 
-module.exports = { listMembers, listRoles, fetchMember, postEmbed, postImage, botConfigured };
+module.exports = { listMembers, listRoles, fetchMember, postEmbed, postImage, botConfigured, invalidateGuild };

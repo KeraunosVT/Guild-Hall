@@ -90,6 +90,7 @@ const section = (t) => console.log('\n' + t);
       ['/api/signups/mine', null],
       ['/api/signups/' + idA.event_signups.id, A_MARK],
       ['/api/admin/signups?date=2099-06-01', A_MARK],
+      ['/api/admin/settings', null],
       ['/api/admin/match/' + idA.wargame_matches.id, A_MARK],
       ['/api/admin/loot/import-status', null],
     ];
@@ -230,6 +231,46 @@ const section = (t) => console.log('\n' + t);
       check(`  ${table} row absent from guild B`, !(inB || []).some((x) => nameOf(x).includes('Probe')));
       created.push(table);
     }
+
+    // ── 3b. SETTINGS: THE ONE WRITE tenantDb DOES NOT SCOPE ──────────────────
+    // `guilds` is on tenantDb's GLOBAL_TABLES list, so the wrapper injects no
+    // filter — an `update(...)` on it with a forgotten `.eq('id', …)` would
+    // rewrite EVERY tenant on the deployment in one statement, and every other
+    // check in this suite would still pass because it is scoped by guild_id.
+    // Nothing else in the codebase writes this table, so this is its only test.
+    //
+    // Both fixtures carry `admin_role_ids: []`, which the lockout guard refuses
+    // outright — so this also pins the guard's ordering: it has to run BEFORE
+    // the database is touched, not after.
+    section('3b. guild settings cannot reach another tenant');
+    const guildsBefore = JSON.stringify((await fx.supabase.from('guilds')
+      .select('*').in('id', [A.id, B.id]).order('id')).data);
+
+    const setRes = await call('/api/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        // Aliases stay additive (the fixture's match rows use tag 'AAA'), so
+        // the alias guard passes and the officer-role guard is what refuses —
+        // otherwise this would pass on the wrong assertion.
+        house: 'Hijacked House', tag: 'HIJ', aliases: ['AAA'],
+        timezone: 'UTC', day_start: '02:00',
+        admin_role_ids: [], allowed_role_ids: [], member_role_ids: [],
+      }),
+    });
+    check('empty officer-role list is refused', setRes.status === 400,
+      'HTTP ' + setRes.status + ' ' + (await setRes.text()).slice(0, 120));
+
+    const guildsAfter = JSON.stringify((await fx.supabase.from('guilds')
+      .select('*').in('id', [A.id, B.id]).order('id')).data);
+    check('no guilds row was written at all', guildsBefore === guildsAfter,
+      guildsBefore === guildsAfter ? '' : 'MUTATED');
+
+    // A read is legitimate, and must describe the acting guild only.
+    const setGet = await call('/api/admin/settings');
+    const setText = await setGet.text();
+    check('settings read answers for the acting guild', setText.includes('House Alpha'), setText.slice(0, 120));
+    check('settings read reveals nothing of guild B', !setText.includes('House Beta') && !setText.includes('BBB'),
+      setText.slice(0, 160));
 
     // ── 4. THE SAME SESSION, THE OTHER GUILD ────────────────────────────────
     // OfficerA holds no capabilities in B. Switching the header must switch

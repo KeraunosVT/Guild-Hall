@@ -10,6 +10,7 @@ const createLoa = require('./loa');
 const { todayInGuildTz } = createLoa;
 const createAttendance = require('./attendance');
 const createEventSignups = require('./eventSignups');
+const createGuildSettings = require('./guildSettings');
 const SHARDS = require('../shared/shards.json');
 // shared/guild.json is only the seed template now; live per-guild config comes
 // from req.guild (the guilds row) — plan task 9.
@@ -124,6 +125,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // what the website and the /loa command show.
   const loa = supabase ? createLoa(supabase, identities) : null;
   const signups = supabase ? createEventSignups(supabase, identities) : null;
+  const guildSettings = supabase ? createGuildSettings(supabase) : null;
 
   router.get('/whoami', (req, res) => {
     res.json({ admin: true, username: req.user.username });
@@ -1509,6 +1511,38 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     if (error) return res.status(500).json({ error: 'Failed to revoke permission.' });
     perms.invalidate(req.guildId);
     res.json({ ok: true });
+  });
+
+  // ── Guild settings: the tenant's own guilds row ─────────────────────────────
+  // Everything scripts/onboardGuild.js sets and nothing else could change
+  // afterwards. Mounted under /api/admin so the audit middleware records who
+  // changed the officer roles and when — the first question anyone asks after a
+  // lockout, and previously unanswerable because these edits happened in the
+  // SQL editor.
+  //
+  // Roles and channels come back with the values so the form can offer pickers.
+  // Both are best-effort: a Discord outage must still let someone fix a typo in
+  // the guild motto, and the page falls back to showing stored ids.
+  router.get('/settings', async (req, res) => {
+    if (!guildSettings) return res.status(503).json({ error: 'Database not configured.' });
+    const [roles, channels] = await Promise.all([
+      listRoles(req.guild).catch((err) => { console.error('settings listRoles failed:', err.message); return []; }),
+      Promise.resolve(gateway ? gateway.listTextChannels(req.guild) : []),
+    ]);
+    res.json({ settings: guildSettings.current(req.guild), roles, channels });
+  });
+
+  router.put('/settings', async (req, res) => {
+    if (!guildSettings) return res.status(503).json({ error: 'Database not configured.' });
+    try {
+      // req.guild is the RESOLVED row for this request, not anything the body
+      // supplied — which is what makes it impossible to aim this at another
+      // tenant by posting a different id.
+      const result = await guildSettings.save(req.guild, req.body, req.user);
+      res.json(result);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
   });
 
   // ── Market potentials (auction-house floors, from the scraper) ───────────────
