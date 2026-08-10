@@ -14,6 +14,9 @@ const SUITES = [
   ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],
+  // Correctness WITHIN a guild rather than isolation between guilds — capacity,
+  // waitlist order, and the races the signup RPCs exist to serialise.
+  ['signup semantics (concurrency)', 'signupSemantics.js', true],
 ];
 
 const needsDb = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
