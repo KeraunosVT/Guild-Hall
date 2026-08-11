@@ -15,7 +15,7 @@ const {
   router: authRouter, requireAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
   applyGuildAccess,
 } = require('./auth');
-const { listMembers } = require('./discord');
+const { listMembers, listRoles } = require('./discord');
 const createGuildContext = require('./guildContext');
 const { tenantDb } = require('./tenantDb');
 const SHARDS = require('../shared/shards.json');
@@ -684,6 +684,32 @@ app.get('/api/signups/mine', async (req, res) => {
   }
 });
 
+// What the officer form needs to offer a ping picker: the guild's roles, and
+// the default it would use if nothing is chosen. Officer-only — a role list is
+// not secret, but the guild's default ping is officer-shaped config, and there
+// is no reason for a member page to fetch either.
+//
+// Also declared before /:id. Same trap as /mine.
+//
+// @everyone is added by hand because listRoles() filters it out (its id is the
+// guild id, and it is not a role anybody would want in an officer-role picker).
+// Here it is exactly what a raid call wants, so it goes back in — at the top,
+// where its weight is obvious, and flagged so the UI can warn about it.
+app.get('/api/signups/options', async (req, res) => {
+  if (!requireSignupOfficer(req, res)) return;
+  const roles = await listRoles(req.guild).catch((err) => {
+    console.error('signup options listRoles failed:', err.message);
+    return [];
+  });
+  res.json({
+    roles: [
+      { id: req.guild.discord_guild_id, name: 'everyone', everyone: true },
+      ...roles,
+    ],
+    default_mention_role_id: req.guild.signup_mention_role_id || null,
+  });
+});
+
 app.get('/api/signups/:id', async (req, res) => {
   if (!signups) return res.status(503).json({ error: 'Database not configured.' });
   try {
@@ -752,7 +778,8 @@ app.delete('/api/signups/:id/entries/:discordId', async (req, res) => {
 app.post('/api/signups', async (req, res) => {
   if (!signups) return res.status(503).json({ error: 'Database not configured.' });
   if (!requireSignupOfficer(req, res)) return;
-  const { event_schedule_id, event_date, start_time, title, capacity, reminder_lead_minutes, post } = req.body || {};
+  const body = req.body || {};
+  const { event_schedule_id, event_date, start_time, title, capacity, reminder_lead_minutes, post } = body;
   try {
     const signup = await signups.create(req.guild, {
       eventScheduleId: event_schedule_id || null,
@@ -761,6 +788,11 @@ app.post('/api/signups', async (req, res) => {
       title,
       capacity,
       reminderLeadMinutes: reminder_lead_minutes,
+      // Passed through as undefined when the key is ABSENT, which is what makes
+      // the guild default apply. An explicit null is "ping nobody for this
+      // one" — a different answer, and one a guild with a default set has no
+      // other way to give.
+      mentionRoleId: 'mention_role_id' in body ? body.mention_role_id : undefined,
       createdBy: req.user.username || req.user.id,
     });
     // Answer first — the signup is saved by this point, and Discord is a third
@@ -803,7 +835,7 @@ app.post('/api/signups/:id/post', async (req, res) => {
 app.patch('/api/signups/:id', async (req, res) => {
   if (!signups) return res.status(503).json({ error: 'Database not configured.' });
   if (!requireSignupOfficer(req, res)) return;
-  const { capacity, reminder_lead_minutes } = req.body || {};
+  const { capacity, reminder_lead_minutes, mention_role_id } = req.body || {};
   try {
     let promoted = 0;
     // Capacity goes through its own locking function because raising it
@@ -814,6 +846,13 @@ app.patch('/api/signups/:id', async (req, res) => {
     }
     if (reminder_lead_minutes !== undefined) {
       await signups.setReminder(req.guild, req.params.id, reminder_lead_minutes, { id: req.user.id, name: req.user.username });
+    }
+    // Deliberately does NOT refresh the Discord post. Editing it would rewrite
+    // the message with the new mention suppressed, which is a no-op nobody can
+    // see; the change lands on the next Repost, which is where an officer would
+    // expect a re-announcement to happen.
+    if (mention_role_id !== undefined) {
+      await signups.setMentionRole(req.guild, req.params.id, mention_role_id, { id: req.user.id, name: req.user.username });
     }
     res.json({ ok: true, promoted });
     if (capacity !== undefined) gateway.refreshSignupMessage(req.guild, req.params.id);

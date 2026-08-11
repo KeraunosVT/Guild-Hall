@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import {
   CalendarCheck, Check, X, Users, Clock, Send, Trash2, Bell, Plus, Settings,
-  ChevronDown, AlertTriangle, Loader2, Shield, Swords, Heart, HelpCircle,
+  ChevronDown, AlertTriangle, Loader2, Shield, Swords, Heart, HelpCircle, AtSign,
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { PageShell } from '../components/ui/PageShell';
@@ -65,6 +65,30 @@ function Composition({ composition, className = '' }) {
         <HelpCircle className="w-3.5 h-3.5" /> {c.unknown || 0}
       </span>
     </div>
+  );
+}
+
+// Who the Discord announcement @-mentions. One picker, used by both the "open
+// signups" form and the per-occurrence officer controls, so the two can't drift
+// into offering different options.
+//
+// "No ping" is first and is a real choice, not the absence of one: a guild with
+// a default ping role set needs a way to open a quiet signup, and burying that
+// behind an empty placeholder reads as "unset" instead of "deliberate".
+function PingPicker({ roles, value, onChange, className = '', disabled }) {
+  return (
+    <select value={value || ''} onChange={(e) => onChange(e.target.value)} disabled={disabled}
+      className={className}>
+      <option value="">— No ping —</option>
+      {roles.map((r) => (
+        <option key={r.id} value={r.id}>{r.everyone ? '@everyone' : `@${r.name}`}</option>
+      ))}
+      {/* A stored role the bot can no longer see still has to be selectable, or
+          simply opening this control would silently clear the ping on save. */}
+      {value && !roles.some((r) => r.id === value) && (
+        <option value={value}>{value} (role not visible to the bot)</option>
+      )}
+    </select>
   );
 }
 
@@ -136,6 +160,12 @@ export default function Signups() {
   const [newCapacity, setNewCapacity] = useState('');
   const [newReminder, setNewReminder] = useState('');
   const [creating, setCreating] = useState(false);
+  // The ping picker's options, plus the guild's default. The default is applied
+  // as a pre-selection rather than as a hidden "use default" option, so the form
+  // always shows exactly which role is about to be notified — a mass ping is not
+  // something to leave implied.
+  const [pingRoles, setPingRoles] = useState([]);
+  const [newMention, setNewMention] = useState('');
 
   const load = () => {
     setLoading(true); setError('');
@@ -152,6 +182,12 @@ export default function Signups() {
   useEffect(() => {
     if (!officer) return;
     axios.get('/api/admin/members').then((res) => setMembers(res.data.members || [])).catch(() => {});
+    axios.get('/api/signups/options')
+      .then((res) => {
+        setPingRoles(res.data.roles || []);
+        setNewMention(res.data.default_mention_role_id || '');
+      })
+      .catch(() => {}); // no picker rather than no page — Discord may be down
   }, [officer]);
 
   const eventsOnDate = useMemo(() => {
@@ -161,6 +197,11 @@ export default function Signups() {
 
   const mine = useMemo(() => signups.filter((s) => s.mine), [signups]);
   const shown = tab === 'mine' ? mine : signups;
+
+  const pingsEveryone = useMemo(
+    () => pingRoles.some((r) => r.everyone && r.id === newMention),
+    [pingRoles, newMention],
+  );
 
   const toggle = (id) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -206,6 +247,14 @@ export default function Signups() {
     () => axios.patch(`/api/signups/${s.id}`, { reminder_lead_minutes: value === '' ? null : Number(value) }),
     'Reminder updated.');
 
+  // Changing this does not re-ping anyone — the message already posted is only
+  // ever edited with mentions suppressed. It takes effect on the next Repost,
+  // and the flash message says so rather than leaving an officer to wonder why
+  // their phone stayed quiet.
+  const setMention = (s, value) => act(s.id,
+    () => axios.patch(`/api/signups/${s.id}`, { mention_role_id: value || null }),
+    value ? 'Ping role set — it applies the next time this is posted.' : 'Ping removed.');
+
   const close = (s) => act(s.id, () => axios.post(`/api/signups/${s.id}/close`), 'Signups closed.');
   const repost = (s) => act(s.id, () => axios.post(`/api/signups/${s.id}/post`), 'Posted to Discord.');
   const remind = (s) => act(s.id, () => axios.post(`/api/signups/${s.id}/remind`),
@@ -236,8 +285,15 @@ export default function Signups() {
         title: newTitle.trim() || undefined,
         capacity: newCapacity === '' ? null : Number(newCapacity),
         reminder_lead_minutes: newReminder === '' ? null : Number(newReminder),
+        // Always sent explicitly, including as null. The form has already shown
+        // which role is selected, so "nothing chosen" here means the officer
+        // chose nothing — not that the server should guess.
+        mention_role_id: newMention || null,
       });
       flash('Signups opened and posted to Discord.');
+      // The ping is deliberately NOT reset with the rest: an officer opening
+      // three signups in a row wants the same role each time, and re-picking it
+      // is the step that gets forgotten.
       setNewEventId(''); setNewTitle(''); setNewTime(''); setNewCapacity(''); setNewReminder('');
       setShowOpen(false);
       load();
@@ -313,6 +369,19 @@ export default function Signups() {
                 className="w-full bg-hall border border-line rounded-lg px-4 py-2.5 text-bone focus:outline-none focus:border-brass" />
               <p className="text-ash/50 text-xs mt-1">DMs only members with no answer and no LOA on file.</p>
             </div>
+            <div className="md:col-span-2">
+              <label className="eyebrow text-[10px] text-ash mb-2 flex items-center gap-1.5">
+                <AtSign className="w-3 h-3" /> Ping <span className="text-ash/50">(on the announcement)</span>
+              </label>
+              <PingPicker roles={pingRoles} value={newMention} onChange={setNewMention}
+                className="w-full bg-hall border border-line rounded-lg px-4 py-2.5 text-bone focus:outline-none focus:border-brass" />
+              <p className={`text-xs mt-1 ${pingsEveryone ? 'text-brass' : 'text-ash/50'}`}>
+                Notified once, when the post goes up — never again as people sign up.
+                {pingsEveryone
+                  ? ' @everyone reaches the whole server, including members who never raid.'
+                  : ' Change the default in Guild Settings.'}
+              </p>
+            </div>
           </div>
           <button onClick={create} disabled={creating}
             className="mt-5 inline-flex items-center gap-2 px-6 py-3 bg-brass hover:bg-brassbright text-ink font-semibold rounded-lg transition-colors disabled:opacity-40">
@@ -332,12 +401,13 @@ export default function Signups() {
         <div className="space-y-4">
           {shown.map((s) => (
             <SignupCard
-              key={s.id} signup={s} officer={officer} members={members}
+              key={s.id} signup={s} officer={officer} members={members} pingRoles={pingRoles}
               open={expanded.has(s.id)} onToggle={() => toggle(s.id)}
               busy={busyId === s.id}
               onJoin={() => join(s)} onWithdraw={() => withdraw(s)}
               onRemoveEntry={(id) => removeEntry(s, id)} onAddMember={(m) => addMember(s, m)}
               onCapacity={(v) => setCapacity(s, v)} onReminder={(v) => setReminder(s, v)}
+              onMention={(v) => setMention(s, v)}
               onClose={() => close(s)} onRepost={() => repost(s)} onRemind={() => remind(s)} onDelete={() => del(s)}
             />
           ))}
@@ -348,9 +418,9 @@ export default function Signups() {
 }
 
 function SignupCard({
-  signup: s, officer, members, open, onToggle, busy,
+  signup: s, officer, members, pingRoles, open, onToggle, busy,
   onJoin, onWithdraw, onRemoveEntry, onAddMember,
-  onCapacity, onReminder, onClose, onRepost, onRemind, onDelete,
+  onCapacity, onReminder, onMention, onClose, onRepost, onRemind, onDelete,
 }) {
   const [capacityDraft, setCapacityDraft] = useState(s.capacity ?? '');
   const [reminderDraft, setReminderDraft] = useState(s.reminder_lead_minutes ?? '');
@@ -521,6 +591,17 @@ function SignupCard({
                     <Button variant="secondary" size="none" className="px-3 py-1.5 text-xs" disabled={busy}
                       onClick={() => onReminder(reminderDraft)}>Set</Button>
                   </div>
+                </div>
+                <div>
+                  <label className="eyebrow text-[10px] text-ash mb-1.5 flex items-center gap-1.5">
+                    <AtSign className="w-3 h-3" /> Ping on post
+                  </label>
+                  {/* Saved on change rather than behind a Set button: unlike
+                      capacity there is nothing to confirm, and nothing happens
+                      in Discord until the next Repost. */}
+                  <PingPicker roles={pingRoles} value={s.mention_role_id || ''} disabled={busy}
+                    onChange={onMention}
+                    className="bg-hall border border-line rounded-lg px-3 py-1.5 text-sm text-bone focus:outline-none focus:border-brass" />
                 </div>
                 <div className="flex-1" />
                 <div className="flex flex-wrap items-center gap-2">

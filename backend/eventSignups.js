@@ -37,11 +37,35 @@ const { guildDayOfWeek, isAfterMidnight } = createLoa;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const SNOWFLAKE = /^\d{17,20}$/;
 
 function httpError(status, message) {
   const err = new Error(message);
   err.status = status;
   return err;
+}
+
+// Which role the announcement pings, resolved ONCE at create time and then
+// stored on the occurrence.
+//
+// The three states are deliberately distinct, and the difference between two of
+// them is the whole reason this isn't a one-liner:
+//   undefined  — the caller said nothing, so the guild's default applies
+//   null / ''  — the caller explicitly said "ping nobody" for this one
+//   a snowflake— that role
+// Collapsing the first two would make "no ping" impossible to express for any
+// guild that has a default set, which is the more common of the two requests.
+//
+// Not checked against the guild's live role list: the @everyone role's id is
+// the Discord guild id and never appears in that list, Discord can be down when
+// an officer opens a raid call, and the failure mode of a wrong id is a mention
+// that renders dead — visible, and harmless.
+function resolveMentionRole(guild, supplied) {
+  if (supplied === undefined) return guild.signup_mention_role_id || null;
+  const id = String(supplied ?? '').trim();
+  if (!id) return null;
+  if (!SNOWFLAKE.test(id)) throw httpError(400, `Not a Discord role id — ${id}`);
+  return id;
 }
 
 // Roles come from member_roles, never from the member at signup time. Two
@@ -328,7 +352,7 @@ module.exports = function createEventSignups(supabase, identities = null) {
     // opening signups for Saturday's field boss shouldn't have to restate when
     // it is, and a hand-typed time that disagrees with the schedule is a
     // reconciliation bug waiting to happen.
-    async create(guild, { eventScheduleId, eventDate, startTime, title, capacity, reminderLeadMinutes, createdBy }) {
+    async create(guild, { eventScheduleId, eventDate, startTime, title, capacity, reminderLeadMinutes, mentionRoleId, createdBy }) {
       const db = dbFor(guild);
       if (!DATE_RE.test(eventDate || '')) throw httpError(400, 'Date must be in YYYY-MM-DD format.');
 
@@ -360,6 +384,8 @@ module.exports = function createEventSignups(supabase, identities = null) {
         ? null : parseInt(reminderLeadMinutes, 10);
       if (lead !== null && (!Number.isFinite(lead) || lead <= 0)) throw httpError(400, 'Reminder lead time must be a positive number of minutes.');
 
+      const mention = resolveMentionRole(guild, mentionRoleId);
+
       const id = crypto.randomUUID();
       const { error } = await db.from('event_signups').insert({
         id,
@@ -369,6 +395,7 @@ module.exports = function createEventSignups(supabase, identities = null) {
         event_date: eventDate,
         capacity: cap,
         reminder_lead_minutes: lead,
+        mention_role_id: mention,
         created_by: createdBy || null,
       });
       if (error) {
@@ -464,6 +491,25 @@ module.exports = function createEventSignups(supabase, identities = null) {
       if (error) { console.error('signups.setReminder error:', error.message); throw httpError(500, 'Could not update the reminder.'); }
       await audit(guild, actor, 'signup reminder changed', { signup_id: id, reminder_lead_minutes: lead });
       return { ok: true };
+    },
+
+    // Which role the NEXT post for this occurrence pings. Editing it does not
+    // re-ping anything — the announcement already out there is edited in place
+    // with mentions suppressed (see discordGateway.editSignupMessage), so this
+    // only takes effect on a repost. That is the honest behaviour: an officer
+    // fixing the ping role at 8pm should not make forty phones buzz a second
+    // time for an event they were already told about.
+    //
+    // Unlike create(), an omitted value never means "use the guild default"
+    // here: this is a targeted edit of one field, so a caller reaching it has
+    // by definition said something.
+    async setMentionRole(guild, id, roleId, actor) {
+      const mention = resolveMentionRole(guild, roleId === undefined ? null : roleId);
+      const { error } = await dbFor(guild).from('event_signups')
+        .update({ mention_role_id: mention, updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) { console.error('signups.setMentionRole error:', error.message); throw httpError(500, 'Could not update the ping role.'); }
+      await audit(guild, actor, 'signup ping role changed', { signup_id: id, mention_role_id: mention });
+      return { mention_role_id: mention };
     },
 
     async close(guild, id, actor) {

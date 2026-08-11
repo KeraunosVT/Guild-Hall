@@ -251,6 +251,34 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
   check('withdrawing removes the row rather than recording a decline', afterLeave.length === 0,
     `${afterLeave.length} entries`);
 
+  // ── 9 ─────────────────────────────────────────────────────────────────────
+  // The ping. Pure shaping, no database — but the two ways to get it wrong are
+  // both silent, which is why it is asserted rather than eyeballed:
+  //   · a role id listed under `parse` instead of `roles` renders a pill and
+  //     notifies nobody, which looks identical to success;
+  //   · @everyone put in `roles` does the same, because its id is the guild id
+  //     and Discord will not reach it through the roles allow-list.
+  console.log('\n9. signup ping targeting');
+  const mention = (guildRow, roleId) => T.signupMention(guildRow, { mention_role_id: roleId });
+
+  const plain = mention(rowA, '600000000000000042');
+  check('a role ping names the role in the content', plain.content === '<@&600000000000000042>', plain.content);
+  check('and is allowed through `roles`, not `parse`',
+    JSON.stringify(plain.allowedMentions) === JSON.stringify({ roles: ['600000000000000042'] }),
+    JSON.stringify(plain.allowedMentions));
+
+  const everyone = mention(rowA, rowA.discord_guild_id);
+  check('@everyone is recognised by its guild-id role', everyone.content === '@everyone', everyone.content);
+  check('and goes through `parse`, which is the only way it reaches anyone',
+    JSON.stringify(everyone.allowedMentions) === JSON.stringify({ parse: ['everyone'] }),
+    JSON.stringify(everyone.allowedMentions));
+
+  check('no ping configured means no content at all', mention(rowA, null) === null);
+  // Guild B's id is just another snowflake to guild A — it must not be mistaken
+  // for A's @everyone and widened into a server-wide ping.
+  check('another tenant\'s guild id is treated as an ordinary role',
+    mention(rowA, rowB.discord_guild_id).content === `<@&${rowB.discord_guild_id}>`);
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
   for (const t of ['event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', [rowA.id, rowB.id]);
   await s.from('guilds').delete().in('id', [rowA.id, rowB.id]);

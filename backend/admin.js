@@ -1529,7 +1529,18 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       listRoles(req.guild).catch((err) => { console.error('settings listRoles failed:', err.message); return []; }),
       Promise.resolve(gateway ? gateway.listTextChannels(req.guild) : []),
     ]);
-    res.json({ settings: guildSettings.current(req.guild), roles, channels });
+    // everyone_role_id is this server's @everyone role — its id is the Discord
+    // guild id, and listRoles() filters it out on purpose so nobody can hand
+    // officer capabilities to the entire server by misclicking. The signup ping
+    // picker is the one place it belongs, so it is sent separately rather than
+    // smuggled into `roles`, where every other picker on this page would offer
+    // it too.
+    res.json({
+      settings: guildSettings.current(req.guild),
+      roles,
+      channels,
+      everyone_role_id: req.guild.discord_guild_id,
+    });
   });
 
   router.put('/settings', async (req, res) => {

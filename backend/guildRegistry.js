@@ -38,7 +38,10 @@ const COLUMNS = [
   // what happened to signup_channel_id: posts fell back to the announce channel
   // no matter what was set, and the settings form would then have saved that
   // undefined back over the real value.
-  'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id', 'status',
+  'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id',
+  // Which role a new signup announcement pings by default. Same trap as the
+  // channel ids above: forget it here and every signup silently pings nobody.
+  'signup_mention_role_id', 'status',
 ].join(', ');
 
 async function resolveByDiscordId(supabase, discordGuildId) {

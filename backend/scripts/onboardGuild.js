@@ -54,6 +54,10 @@ const guild = {
   // announce channel, which is where a guild already talks about events. It is
   // only worth setting when signups deserve a room of their own.
   signup_channel_id: String(flag('signup-channel') || input.signup_channel_id || '').trim() || null,
+  // Also optional: blank means signup announcements ping nobody, which is the
+  // right default for a guild that hasn't asked for it. Officers can set it
+  // later on the Guild Settings page, or override it per event.
+  signup_mention_role_id: String(flag('signup-ping-role') || input.signup_mention_role_id || '').trim() || null,
   status: 'active',
 };
 
@@ -86,7 +90,8 @@ for (const f of ['admin_role_ids', 'allowed_role_ids', 'member_role_ids']) {
   const bad = guild[f].filter((id) => !snowflake.test(id));
   if (bad.length) problems.push(`${f}: not Discord ids — ${bad.join(', ')}`);
 }
-for (const f of ['roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id']) {
+for (const f of ['roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id',
+  'signup_mention_role_id']) {
   if (guild[f] && !snowflake.test(guild[f])) problems.push(`${f}: not a Discord id — ${guild[f]}`);
 }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Save, ShieldAlert, Hash, Clock, Plus, X, Loader2, AlertTriangle } from 'lucide-react';
+import { Save, ShieldAlert, Hash, Clock, Plus, X, Loader2, AlertTriangle, AtSign } from 'lucide-react';
 import { useAuth } from '../auth';
 import RestrictedGate from '../components/ui/RestrictedGate';
 import { PageShell } from '../components/ui/PageShell';
@@ -109,6 +109,10 @@ export default function GuildSettings() {
   const [original, setOriginal] = useState(null);
   const [roles, setRoles] = useState([]);
   const [channels, setChannels] = useState([]);
+  // The @everyone role, sent separately from `roles` on purpose — see the
+  // comment on GET /api/admin/settings. It belongs in the signup ping picker
+  // and in none of the role pickers above it.
+  const [everyoneId, setEveryoneId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -122,6 +126,7 @@ export default function GuildSettings() {
         setOriginal(res.data.settings);
         setRoles(res.data.roles || []);
         setChannels(res.data.channels || []);
+        setEveryoneId(res.data.everyone_role_id || '');
       })
       .catch((err) => setError(err.response?.data?.error || 'Could not load settings.'))
       .finally(() => setLoading(false));
@@ -308,6 +313,34 @@ export default function GuildSettings() {
               );
             })}
           </div>
+
+          {/* Not a channel, but it belongs with them: this is the other half of
+              "where does a signup announcement go and who does it reach". */}
+          <Field label={<span className="flex items-center gap-1.5"><AtSign className="w-3 h-3" /> Default signup ping</span>}
+            hint="Pinged once when a signup announcement is posted — never again as people click. Officers can override it per event, and choose no ping at all.">
+            <select value={form.signup_mention_role_id || ''}
+              onChange={(e) => set('signup_mention_role_id', e.target.value || null)}
+              className={`${inputClass} md:w-1/2`}>
+              <option value="">— No ping —</option>
+              {everyoneId && <option value={everyoneId}>@everyone</option>}
+              {roles.map((r) => <option key={r.id} value={r.id}>@{r.name}</option>)}
+              {/* A role the bot can't see has to stay selectable, or opening
+                  this page during a Discord outage and saving would clear it. */}
+              {form.signup_mention_role_id
+                && form.signup_mention_role_id !== everyoneId
+                && !roles.some((r) => r.id === form.signup_mention_role_id) && (
+                <option value={form.signup_mention_role_id}>
+                  {form.signup_mention_role_id} (not visible to the bot)
+                </option>
+              )}
+            </select>
+            {form.signup_mention_role_id && form.signup_mention_role_id === everyoneId && (
+              <p className="text-brass text-xs mt-2 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                Every signup will notify the whole server by default, including members who never raid.
+              </p>
+            )}
+          </Field>
         </section>
       </div>
 

@@ -866,6 +866,34 @@ function signupComponents(view) {
   )];
 }
 
+// ── Pinging a role ──────────────────────────────────────────────────────────
+// The mention goes in the message CONTENT, never in the embed. Discord does not
+// notify anyone for a mention that appears only inside an embed — it renders as
+// a role pill and reaches nobody, which is the worst kind of failure here
+// because it looks exactly like success.
+//
+// allowedMentions is then passed explicitly on every send and every edit. Left
+// off, discord.js parses whatever the content happens to contain, which turns a
+// guild that types "@everyone" into a signup title into a mass ping.
+//
+// Note for anyone debugging a ping that renders but doesn't notify: a role that
+// is not marked "Allow anyone to @mention this role" in Discord can still be
+// pinged by a bot, but only one holding the "Mention @everyone, @here, and All
+// Roles" permission. That is a Discord permission on the bot, not something
+// this code can grant itself.
+function signupMention(guildHall, view) {
+  const roleId = view && view.mention_role_id;
+  if (!roleId) return null;
+  // @everyone is a genuine role whose id equals the Discord guild id — not a
+  // sentinel in our data, but a special case in the API: it is reached through
+  // `parse`, never through the roles allow-list, and listing its id under
+  // `roles` silently notifies nobody.
+  if (String(roleId) === String((guildHall && guildHall.discord_guild_id) || '')) {
+    return { content: '@everyone', allowedMentions: { parse: ['everyone'] } };
+  }
+  return { content: `<@&${roleId}>`, allowedMentions: { roles: [String(roleId)] } };
+}
+
 function signupChannel(guildHall) {
   const channelId = signupChannelOf(guildHall);
   if (!channelId) return null;
@@ -886,7 +914,15 @@ async function postSignupMessage(guildHall, view) {
   const channel = signupChannel(guildHall);
   if (!channel) return null;
   try {
-    const message = await channel.send({ embeds: [signupEmbed(guildHall, view)], components: signupComponents(view) });
+    const mention = signupMention(guildHall, view);
+    const message = await channel.send({
+      content: mention ? mention.content : undefined,
+      embeds: [signupEmbed(guildHall, view)],
+      components: signupComponents(view),
+      // The ONLY place in this feature that is allowed to notify anyone. Every
+      // other send and edit below passes an empty allow-list.
+      allowedMentions: mention ? mention.allowedMentions : { parse: [] },
+    });
     return { channelId: channel.id, messageId: message.id };
   } catch (err) {
     console.error('Signup post error:', err.message);
@@ -945,7 +981,17 @@ async function editSignupMessage(guildHall, signupId) {
   if (!channel?.isTextBased()) return;
   try {
     const message = await channel.messages.fetch(view.message_id);
-    await message.edit({ embeds: [signupEmbed(guildHall, view)], components: signupComponents(view) });
+    const mention = signupMention(guildHall, view);
+    await message.edit({
+      // Kept so the post still reads as addressed to that role, but with
+      // mentions suppressed: this fires on every join, every withdrawal and
+      // every close. A guild that got pinged each time someone clicked "I'm in"
+      // would mute the channel by the second event.
+      content: mention ? mention.content : '',
+      embeds: [signupEmbed(guildHall, view)],
+      components: signupComponents(view),
+      allowedMentions: { parse: [] },
+    });
   } catch (err) {
     // A message deleted by hand is the common case. Logged, not repaired: the
     // officer page has an explicit "Repost" for that, and silently posting a
@@ -1179,5 +1225,6 @@ module.exports.__test = {
   handleButton,
   signupEmbed,
   signupComponents,
+  signupMention,
   runSignupSweep,
 };

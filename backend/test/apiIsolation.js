@@ -88,6 +88,7 @@ const section = (t) => console.log('\n' + t);
       ['/api/admin/loa/unavailable', null],
       ['/api/signups', A_MARK],
       ['/api/signups/mine', null],
+      ['/api/signups/options', null],
       ['/api/signups/' + idA.event_signups.id, A_MARK],
       ['/api/admin/signups?date=2099-06-01', A_MARK],
       ['/api/admin/settings', null],
@@ -154,6 +155,10 @@ const section = (t) => console.log('\n' + t);
       ['POST', '/api/signups/' + idB.event_signups.id + '/join', {}],
       ['DELETE', '/api/signups/' + idB.event_signups.id + '/join'],
       ['PATCH', '/api/signups/' + idB.event_signups.id, { capacity: 99 }],
+      // A separate probe from the capacity one above: this field takes a plain
+      // column update rather than the locking RPC, so it does not inherit that
+      // path's p_guild_id scoping and has to be scoped on its own.
+      ['PATCH', '/api/signups/' + idB.event_signups.id, { mention_role_id: '600000000000000777' }],
       ['POST', '/api/signups/' + idB.event_signups.id + '/close', {}],
       ['DELETE', '/api/signups/' + idB.event_signups.id],
     ];

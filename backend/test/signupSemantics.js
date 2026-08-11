@@ -21,6 +21,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 const { assertSafeTarget } = require('./lib/harness');
+const createEventSignups = require('../eventSignups');
 
 const s = createClient(
   process.env.TEST_SUPABASE_URL || process.env.SUPABASE_URL,
@@ -180,6 +181,33 @@ const uid = (n) => `9${String(n).padStart(11, '0')}`;
   check('status "declined" is rejected by the check constraint', bad.error?.code === '23514',
     bad.error ? bad.error.code : 'ACCEPTED — the constraint is missing');
 
+  // ── 10 ───────────────────────────────────────────────────────────────────
+  // The ping role's three-state resolution. This is the subtlest rule in the
+  // feature and every way of getting it wrong is silent: collapse "omitted"
+  // into "null" and a guild's configured ping quietly stops firing; collapse
+  // "null" into "omitted" and a guild with a default can never open a quiet
+  // signup. Neither raises anything, and both are only noticed by the guild.
+  section('10. the ping role resolves in three distinct states');
+  const DEFAULT_ROLE = '900000000000000111';
+  const OVERRIDE_ROLE = '900000000000000222';
+  const withDefault = { ...G, signup_mention_role_id: DEFAULT_ROLE };
+  const mod = createEventSignups(s);
+  const opened = async (guildRow, extra) => (await mod.create(guildRow, {
+    eventDate: '2099-03-01', startTime: '21:00', title: 'Ping probe', createdBy: 'test', ...extra,
+  })).mention_role_id;
+
+  check('omitting it takes the guild default', await opened(withDefault, {}) === DEFAULT_ROLE);
+  check('an explicit null means no ping, default or not',
+    await opened(withDefault, { mentionRoleId: null }) === null);
+  check('an explicit role overrides the default',
+    await opened(withDefault, { mentionRoleId: OVERRIDE_ROLE }) === OVERRIDE_ROLE);
+  check('no default and nothing supplied means no ping', await opened(G, {}) === null);
+
+  let rejected = null;
+  try { await opened(G, { mentionRoleId: 'not-a-snowflake' }); } catch (e) { rejected = e.status; }
+  check('a malformed role id is refused rather than stored', rejected === 400, String(rejected));
+
+  await s.from('audit_log').delete().eq('guild_id', G.id);
   await s.from('event_signup_entries').delete().eq('guild_id', G.id);
   await s.from('event_signups').delete().eq('guild_id', G.id);
   await s.from('guilds').delete().eq('id', G.id);

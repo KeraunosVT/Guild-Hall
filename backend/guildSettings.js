@@ -26,6 +26,7 @@ const EDITABLE = [
   'timezone', 'day_start',
   'admin_role_ids', 'allowed_role_ids', 'member_role_ids',
   'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id',
+  'signup_mention_role_id',
 ];
 
 function httpError(status, message) {
@@ -53,6 +54,15 @@ function channelId(v, label) {
   const s = String(v ?? '').trim();
   if (!s) return null;
   if (!SNOWFLAKE.test(s)) throw httpError(400, `${label}: not a Discord channel id — ${s}`);
+  return s;
+}
+
+// One optional role, for settings that name a single role rather than a list.
+// Blank means "ping nobody", which is a real choice and the default.
+function roleId(v, label) {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  if (!SNOWFLAKE.test(s)) throw httpError(400, `${label}: not a Discord role id — ${s}`);
   return s;
 }
 
@@ -187,6 +197,12 @@ module.exports = function createGuildSettings(supabase) {
         loa_channel_id: channelId(b.loa_channel_id, 'LOA channel'),
         announce_channel_id: channelId(b.announce_channel_id, 'Announce channel'),
         signup_channel_id: channelId(b.signup_channel_id, 'Signup channel'),
+        // Not validated against the guild's live role list on purpose: Discord
+        // being unreachable must not stop someone fixing the motto, and the
+        // @everyone role (whose id is the Discord guild id) never appears in
+        // that list anyway. A wrong id renders as a dead mention, which is
+        // visible and harmless — unlike a wrong officer role.
+        signup_mention_role_id: roleId(b.signup_mention_role_id, 'Signup ping role'),
       };
 
       const before = Array.isArray(guild.aliases) ? guild.aliases.filter(Boolean) : [];
