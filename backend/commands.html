@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Discord commands — Guild Hall</title>
-  <meta name="description" content="Every slash command the Guild Hall bot answers: leave of absence, elite boss timers, attendance snapshots, and timed announcements." />
+  <meta name="description" content="Every slash command the Guild Hall bot answers: leave of absence, elite boss timers, attendance snapshots, timed announcements — plus the signup post's buttons." />
   <meta property="og:title" content="Guild Hall — Discord commands" />
   <meta property="og:description" content="Every slash command the Guild Hall bot answers, what each option does, and who can run it." />
   <meta property="og:type" content="article" />
@@ -217,6 +217,8 @@
         Five commands — eight forms once you count the LOA variants — run from any channel in your
         guild's Discord server. Times are read in your guild's own timezone, and everything you file
         lands in your guild's records only: the bot serves several houses and never mixes them.
+        One thing the bot does isn't a command at all: <a href="#signups" style="color:var(--brassbright)">signup
+        posts</a> are answered with buttons.
       </p>
     </div>
 
@@ -433,6 +435,61 @@
                 <tr><td><code>role</code></td><td><span class="opt">optional</span></td><td>Pings this role. Leave blank for a quiet post.</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- Not a command, but the surface most members touch most often. It is on
+         this page because this is where someone goes to find out how the bot
+         works, and "what do those buttons do" is exactly that question. -->
+    <section id="signups">
+      <h2>Signup posts <span class="qualifier">— buttons, not commands</span></h2>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature">I'm in &nbsp;·&nbsp; Withdraw &nbsp;·&nbsp; Who's coming?</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>When officers open signups for a night, the bot posts the event with three buttons. There
+            is nothing to type — press one, and the post updates itself with who is coming, grouped by
+            Tank, DPS and Healer.</p>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Button</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>I'm in</code></td><td><span class="req">counts you</span></td><td>Pressing it twice changes nothing — you are counted once or not at all. If the night is capped and full, you join a waitlist instead and are told your place in it.</td></tr>
+                <tr><td><code>Withdraw</code></td><td><span class="opt">undoes it</span></td><td>Takes your name back off. If you were holding a slot on a capped night, whoever has waited longest moves into it straight away.</td></tr>
+                <tr><td><code>Who's coming?</code></td><td><span class="opt">private</span></td><td>The full list and the role split, answered only to you so the channel stays clean.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="aside">
+            <span class="marker">Not a no</span>
+            <span>There is no "can't make it" button, and that is deliberate. Signing up says
+              <em>I'm coming</em>; saying nothing means nobody knows either way. If you know you're out,
+              file it with <code>/loa</code> — that is the record officers plan around, and withdrawing
+              is not the same thing.</span>
+          </div>
+          <div class="aside">
+            <span class="marker">The ping</span>
+            <span>Officers can have the post @-mention a role when it goes up. That happens
+              <strong>once</strong>, when the announcement is first posted — the message is edited every
+              time somebody signs up or drops out, and none of those edits notify anyone.</span>
+          </div>
+          <div class="aside">
+            <span class="marker">Nudges</span>
+            <span>A night may carry a reminder some minutes before it starts. It is a DM, and it only
+              goes to people who have neither pressed a button nor filed an LOA — never to anyone who
+              has already answered either way. It is sent once, however many times an officer asks
+              for it.</span>
+          </div>
+          <div class="aside">
+            <span class="marker">Old posts still work</span>
+            <span>The buttons keep working after the bot restarts, so a post from last week is still
+              live. They disappear entirely once the event's start time passes, rather than sitting
+              there greyed out.</span>
           </div>
         </div>
       </article>
