@@ -17,6 +17,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const perms = require('../../permissions');
+const { DEMO_DISCORD_GUILD } = require('../../scripts/demoFixture');
 
 // Prefer a dedicated test project. TEST_SUPABASE_URL exists so these suites
 // never have to point at the same database the live site serves.
@@ -45,8 +46,17 @@ async function assertSafeTarget() {
   // aborts before cleanup leaves them behind, and counting those would let one
   // crash lock out every subsequent run — the guard would be protecting the
   // database from nothing but itself. purgeStale() clears them moments later.
+  //
+  // The demo guild is exempt for a different reason: scripts/demoGuild.js wrote
+  // it, its contents are invented, and its id is fixed and known. It is the one
+  // thing on a scratch project that is guaranteed NOT to be real guild data.
+  // Without this, seeding the demo would silently stop the whole test suite
+  // from running, and the fix would look like "delete your demo".
+  //
+  // It is exempted here but deliberately NOT added to purgeStale(): tests must
+  // not delete something a person is in the middle of looking at.
   const { data: fixtures } = await supabase.from('guilds')
-    .select('id').in('discord_guild_id', FIXTURE_DISCORD_GUILDS);
+    .select('id').in('discord_guild_id', [...FIXTURE_DISCORD_GUILDS, DEMO_DISCORD_GUILD]);
   const fixtureIds = (fixtures || []).map((r) => r.id);
 
   let rows = 0;

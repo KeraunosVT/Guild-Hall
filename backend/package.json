@@ -8,7 +8,11 @@
     "test:audit": "node test/leakAudit.js",
     "test:isolation": "node test/apiIsolation.js",
     "test:bot": "node test/botIsolation.js",
-    "test:login": "node test/loginFlow.js"
+    "test:login": "node test/loginFlow.js",
+    "test:signups": "node test/signupSemantics.js",
+    "demo": "node scripts/demoServer.js",
+    "demo:seed": "node scripts/demoGuild.js",
+    "demo:purge": "node scripts/demoGuild.js --purge"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

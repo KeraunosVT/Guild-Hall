@@ -130,10 +130,20 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
 
   // ── 1. Unregistered server is refused, and writes nothing ─────────────────
   console.log('\n1. unregistered server');
+  // Deliberately counted across EVERY guild, not just A and B: the failure this
+  // guards against is a write that lands under some other tenant entirely, and
+  // scoping the check to the two fixtures would be blind to exactly that.
+  //
+  // Compared against a before-count rather than against zero, because this
+  // database legitimately holds rows the suite did not write — a seeded demo
+  // guild has its own Laslan timer, and asserting zero would report that as a
+  // leak the interaction never caused.
+  const laslanBefore = ((await s.from('elite_timers').select('guild_id').eq('location', 'Laslan')).data || []).length;
   let i = await run(makeInteraction({ guildId: '600000000000009999', command: 'elitetimer', opts: { location: 'Laslan', time: '10:00' } }));
   check('refused with an explanation', /not registered/i.test(i.replies[0] || ''), i.replies[0] || '(no reply)');
   const orphan = (await s.from('elite_timers').select('*').eq('location', 'Laslan')).data || [];
-  check('wrote no elite_timers row anywhere', orphan.length === 0, orphan.length + ' rows');
+  check('wrote no elite_timers row anywhere', orphan.length === laslanBefore,
+    `${orphan.length} rows, was ${laslanBefore}`);
 
   // ── 2. Same location reported in both guilds ──────────────────────────────
   console.log('\n2. identical elite timer in both guilds');
