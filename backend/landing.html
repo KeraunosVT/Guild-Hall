@@ -116,6 +116,50 @@
     .card h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin-bottom: 8px; }
     .card p { color: var(--ash); font-size: 15px; }
 
+    /* ── screenshot showcase ────────────────────────────────────────────────
+       One image on screen at a time, switched by the tab strip. A grid of eight
+       screenshots would be ~2.5 MB of PNG on a marketing page nobody has decided
+       to trust yet; this loads the first eagerly and the rest only when asked
+       for, so the page still weighs almost nothing on arrival. */
+    .shots { margin-top: 8px; }
+    .shot-tabs {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 22px;
+    }
+    .shot-tab {
+      font-family: var(--font-display); font-weight: 500; font-size: 14px;
+      padding: 8px 16px; border-radius: 999px; cursor: pointer;
+      background: transparent; border: 1px solid var(--line); color: var(--ash);
+      transition: border-color .15s ease, color .15s ease, background .15s ease;
+    }
+    .shot-tab:hover { color: var(--bone); border-color: rgba(214,69,69,0.4); }
+    .shot-tab[aria-selected="true"] {
+      background: var(--brass); border-color: var(--brass); color: #fff;
+    }
+    .shot-frame {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    }
+    /* Fixed aspect box so switching tabs doesn't make the page jump as each
+       image loads — the layout is reserved before the bytes arrive. */
+    .shot-frame .stage { position: relative; aspect-ratio: 1440 / 900; background: var(--ink); }
+    .shot-frame img {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; object-position: top left;
+      opacity: 0; transition: opacity .2s ease;
+    }
+    .shot-frame img[data-active="true"] { opacity: 1; }
+    .shot-caption {
+      border-top: 1px solid var(--line); padding: 18px 22px;
+      display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;
+    }
+    .shot-caption h3 { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
+    .shot-caption p { color: var(--ash); font-size: 15px; flex: 1 1 320px; }
+    .shot-note { text-align: center; color: var(--ash); font-size: 13px; margin-top: 16px; opacity: .8; }
+    @media (max-width: 640px) {
+      .shot-tab { font-size: 13px; padding: 7px 12px; }
+      .shot-caption { padding: 14px 16px; }
+    }
+
     /* standout / stats strip */
     .standout {
       background: linear-gradient(135deg, var(--panel), var(--oxblooddeep));
@@ -191,7 +235,7 @@
       <p class="sub">Rosters, attendance, gear tracking, loot councils, and war stats — all in one place, with everyone logging in through Discord. Built by guild officers, for guild officers.</p>
       <div class="hero-cta">
         <a href="#early-access" class="btn btn-primary">Request early access</a>
-        <a href="#features" class="btn btn-ghost">See what it does</a>
+        <a href="#screens" class="btn btn-ghost">See it in action</a>
       </div>
       <p class="hero-note">No spreadsheets. No scattered bots. No monthly fee (for now).</p>
     </section>
@@ -231,6 +275,47 @@
           <h3>Roles you control</h3>
           <p>Fine-grained permissions mapped to your Discord roles. Officers get the keys; members see what they should.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- SCREENSHOTS -->
+    <!-- Every image here is the real application photographed against a demo
+         guild whose members, gear and loot are invented (backend/scripts/
+         demoFixture.js). No real guild's data appears on this page, and the
+         screenshot script refuses to run against anything but the demo. -->
+    <section class="section wrap" id="screens">
+      <h2>What it actually looks like</h2>
+      <p class="lead">Real screens, real data — from a demo guild, so nobody's roster is on show.</p>
+
+      <div class="shots">
+        <div class="shot-tabs" role="tablist" aria-label="Product screenshots">
+          <button class="shot-tab" role="tab" aria-selected="true" data-shot="signups">Signups</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="parties">Party builder</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="attendance">Attendance</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="war-record">War record</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="loot">Loot council</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="roster">Roster</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="gear-levels">Gear levels</button>
+          <button class="shot-tab" role="tab" aria-selected="false" data-shot="settings">Settings</button>
+        </div>
+
+        <div class="shot-frame">
+          <div class="stage">
+            <img data-shot="signups" data-active="true" src="/shots/signups.png" alt="Event signups: attendees grouped by Tank, DPS and Healer, with a waitlist and officer controls" width="1440" height="900" />
+            <img data-shot="parties" loading="lazy" src="/shots/parties.png" alt="Party builder with members seeded into parties from a signup" width="1440" height="900" />
+            <img data-shot="attendance" loading="lazy" src="/shots/attendance.png" alt="Attendance for a logged night, split into who attended and who did not" width="1440" height="900" />
+            <img data-shot="war-record" loading="lazy" src="/shots/war-record.png" alt="War record: per-map win rate and a full engagement scoreboard" width="1440" height="900" />
+            <img data-shot="loot" loading="lazy" src="/shots/loot.png" alt="Loot council showing wishlist demand per item" width="1440" height="900" />
+            <img data-shot="roster" loading="lazy" src="/shots/roster.png" alt="Guild roster with each member's class, role and gear" width="1440" height="900" />
+            <img data-shot="gear-levels" loading="lazy" src="/shots/gear-levels.png" alt="Gear level leaderboard with per-slot item levels and a guild average" width="1440" height="900" />
+            <img data-shot="settings" loading="lazy" src="/shots/settings.png" alt="Guild settings: identity, timezone, Discord roles and channels" width="1440" height="900" />
+          </div>
+          <div class="shot-caption">
+            <h3 data-caption-title>Signups</h3>
+            <p data-caption-text>Members say they're coming in one click, from Discord or the web. Roles come off the roster, so the composition is right without anyone picking one — and a full night rolls into a waitlist that promotes itself.</p>
+          </div>
+        </div>
+        <p class="shot-note">Demo guild — every name, gear level and award shown here is invented.</p>
       </div>
     </section>
 
@@ -287,6 +372,45 @@
 
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
+
+    // ── Screenshot tabs ─────────────────────────────────────────────────────
+    // Captions live here rather than in eight hidden <div>s: they are prose
+    // about one feature each, and keeping them beside the tab that shows them
+    // is the difference between updating one thing and updating two.
+    const SHOT_COPY = {
+      'signups': ['Signups', "Members say they're coming in one click, from Discord or the web. Roles come off the roster, so the composition is right without anyone picking one — and a full night rolls into a waitlist that promotes itself."],
+      'parties': ['Party builder', 'Seed parties straight from who signed up, then drag to taste. It warns you when someone in a party has filed leave for that night, and posts the finished roster to Discord as an image.'],
+      'attendance': ['Attendance', 'Snap a voice channel and the night is logged. Everyone who missed it is split by whether they filed leave — so "no-show" means what it says.'],
+      'war-record': ['War record', 'Upload a scoreboard screenshot and it reads the numbers for you. Per-map win rates, per-player history, and both sides of every engagement.'],
+      'loot': ['Loot council', 'Wishlist demand per item, per build, with the full award history behind it. Nobody has to remember who was owed what.'],
+      'roster': ['Roster', "Every member with their weapons, role and gear in one list — and their whole match history one click away."],
+      'gear-levels': ['Gear levels', 'Members upload their gear window; it is read automatically. Officers get a leaderboard, a guild average, and progression over time.'],
+      'settings': ['Guild settings', 'Your house name, timezone, guild-night rollover, Discord roles and channels — all editable in-app, all audited.'],
+    };
+
+    const shotTabs = Array.from(document.querySelectorAll('.shot-tab'));
+    const shotImgs = Array.from(document.querySelectorAll('.shot-frame img'));
+    const capTitle = document.querySelector('[data-caption-title]');
+    const capText = document.querySelector('[data-caption-text]');
+
+    function showShot(key) {
+      shotTabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.shot === key)));
+      shotImgs.forEach((im) => im.setAttribute('data-active', String(im.dataset.shot === key)));
+      const copy = SHOT_COPY[key];
+      if (copy) { capTitle.textContent = copy[0]; capText.textContent = copy[1]; }
+    }
+
+    shotTabs.forEach((tab) => tab.addEventListener('click', () => showShot(tab.dataset.shot)));
+    // Arrow keys, because a tablist that only answers the mouse is a tablist
+    // people using a keyboard simply cannot reach past the first panel.
+    shotTabs.forEach((tab, i) => tab.addEventListener('keydown', (e) => {
+      const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      const next = shotTabs[(i + step + shotTabs.length) % shotTabs.length];
+      next.focus();
+      showShot(next.dataset.shot);
+    }));
 
     const btn = document.getElementById('submitBtn');
     const msg = document.getElementById('formMsg');

@@ -12,7 +12,8 @@
     "test:signups": "node test/signupSemantics.js",
     "demo": "node scripts/demoServer.js",
     "demo:seed": "node scripts/demoGuild.js",
-    "demo:purge": "node scripts/demoGuild.js --purge"
+    "demo:purge": "node scripts/demoGuild.js --purge",
+    "demo:shots": "node scripts/demoShots.js"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",
@@ -30,5 +31,8 @@
     "multer": "^2.1.1",
     "papaparse": "^5.5.3"
   },
-  "license": "AGPL-3.0-only"
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
+  }
 }

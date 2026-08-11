@@ -12,6 +12,16 @@
 // snowflake occupies (they encode a timestamp; 8.1e16 is year 2100+).
 const DEMO_DISCORD_GUILD = '810000000000000001';
 
+// The tenant uuid, pinned rather than generated. Re-seeding purges and
+// re-inserts, so a generated id would be different every time — and the demo
+// server pins SINGLE_GUILD_ID to whatever it found at boot, which means a
+// re-seed would silently orphan a running demo. Every page would answer as if
+// the guild had been deleted, which it had.
+//
+// Hex only — Postgres rejects a uuid with a letter past 'f' in it, so the
+// obvious-looking 'd3m0…' spelling is not available.
+const DEMO_GUILD_ID = 'deadbee5-0000-4000-8000-000000000001';
+
 const ROLE_OFFICER = '810000000000000101';
 const ROLE_MEMBER = '810000000000000102';
 const ROLE_RAIDER = '810000000000000103';
@@ -37,30 +47,30 @@ const uid = (n) => `81000000000${String(n).padStart(6, '0')}`;
 // signup embed and its own warning in the party builder, and a demo where it is
 // always empty hides the feature.
 const MEMBERS = [
-  { n: 1, name: 'Aurelian', role: 'Tank', classes: ['SnSGreatsword'], gear: 4180, officer: true },
-  { n: 2, name: 'Brannoc', role: 'Tank', classes: ['SnSWand'], gear: 4120 },
-  { n: 3, name: 'Caradoc', role: 'Tank', classes: ['SnSGreatsword'], gear: 3990 },
-  { n: 4, name: 'Delwyn', role: 'Healer', classes: ['WandLongbow'], gear: 4210, officer: true },
-  { n: 5, name: 'Eirwen', role: 'Healer', classes: ['WandDagger'], gear: 4075 },
-  { n: 6, name: 'Faelan', role: 'Healer', classes: ['WandLongbow'], gear: 3940 },
-  { n: 7, name: 'Gwyneira', role: 'Healer', classes: ['WandDagger'], gear: 3860 },
-  { n: 8, name: 'Hafgan', role: 'DPS', classes: ['GreatswordDagger'], gear: 4330 },
-  { n: 9, name: 'Idris', role: 'DPS', classes: ['CrossbowDagger'], gear: 4295 },
-  { n: 10, name: 'Jorunn', role: 'DPS', classes: ['StaffDagger'], gear: 4260 },
-  { n: 11, name: 'Kelwyn', role: 'DPS', classes: ['LongbowDagger'], gear: 4240 },
-  { n: 12, name: 'Lorcan', role: 'DPS', classes: ['GreatswordDagger'], gear: 4185 },
-  { n: 13, name: 'Maelor', role: 'DPS', classes: ['SpearDagger'], gear: 4150 },
-  { n: 14, name: 'Nerys', role: 'DPS', classes: ['StaffLongbow'], gear: 4110 },
-  { n: 15, name: 'Osian', role: 'DPS', classes: ['CrossbowGreatsword'], gear: 4090 },
-  { n: 16, name: 'Peredur', role: 'DPS', classes: ['DaggerOrb'], gear: 4020 },
-  { n: 17, name: 'Rhiannon', role: 'DPS', classes: ['StaffDagger'], gear: 3980 },
-  { n: 18, name: 'Seren', role: 'DPS', classes: ['LongbowDagger'], gear: 3915 },
-  { n: 19, name: 'Taliesin', role: 'DPS', classes: ['GreatswordSpear'], gear: 3870 },
-  { n: 20, name: 'Ualan', role: 'DPS', classes: ['CrossbowOrb'], gear: 3820 },
+  { n: 1, name: 'Aurelian', role: 'Tank', classes: ['SnSGreatsword'], gear: 78, officer: true },
+  { n: 2, name: 'Brannoc', role: 'Tank', classes: ['SnSWand'], gear: 74 },
+  { n: 3, name: 'Caradoc', role: 'Tank', classes: ['SnSGreatsword'], gear: 69 },
+  { n: 4, name: 'Delwyn', role: 'Healer', classes: ['WandLongbow'], gear: 80, officer: true },
+  { n: 5, name: 'Eirwen', role: 'Healer', classes: ['WandDagger'], gear: 72 },
+  { n: 6, name: 'Faelan', role: 'Healer', classes: ['WandLongbow'], gear: 66 },
+  { n: 7, name: 'Gwyneira', role: 'Healer', classes: ['WandDagger'], gear: 63 },
+  { n: 8, name: 'Hafgan', role: 'DPS', classes: ['GreatswordDagger'], gear: 80 },
+  { n: 9, name: 'Idris', role: 'DPS', classes: ['CrossbowDagger'], gear: 79 },
+  { n: 10, name: 'Jorunn', role: 'DPS', classes: ['StaffDagger'], gear: 77 },
+  { n: 11, name: 'Kelwyn', role: 'DPS', classes: ['LongbowDagger'], gear: 76 },
+  { n: 12, name: 'Lorcan', role: 'DPS', classes: ['GreatswordDagger'], gear: 74 },
+  { n: 13, name: 'Maelor', role: 'DPS', classes: ['SpearDagger'], gear: 72 },
+  { n: 14, name: 'Nerys', role: 'DPS', classes: ['StaffLongbow'], gear: 70 },
+  { n: 15, name: 'Osian', role: 'DPS', classes: ['CrossbowGreatsword'], gear: 68 },
+  { n: 16, name: 'Peredur', role: 'DPS', classes: ['DaggerOrb'], gear: 66 },
+  { n: 17, name: 'Rhiannon', role: 'DPS', classes: ['StaffDagger'], gear: 64 },
+  { n: 18, name: 'Seren', role: 'DPS', classes: ['LongbowDagger'], gear: 61 },
+  { n: 19, name: 'Taliesin', role: 'DPS', classes: ['GreatswordSpear'], gear: 58 },
+  { n: 20, name: 'Ualan', role: 'DPS', classes: ['CrossbowOrb'], gear: 56 },
   // No role on file — the group every other surface counts separately.
-  { n: 21, name: 'Vaughn', role: null, classes: [], gear: 3610, trial: true },
-  { n: 22, name: 'Wynne', role: null, classes: [], gear: 3540, trial: true },
-  { n: 23, name: 'Yestin', role: null, classes: [], gear: 3480, trial: true },
+  { n: 21, name: 'Vaughn', role: null, classes: [], gear: 54, trial: true },
+  { n: 22, name: 'Wynne', role: null, classes: [], gear: 52, trial: true },
+  { n: 23, name: 'Yestin', role: null, classes: [], gear: 50, trial: true },
   { n: 24, name: 'Zephyrine', role: null, classes: [], gear: 0, trial: true },
 ].map((m) => ({
   ...m,
@@ -79,7 +89,7 @@ const MEMBERS = [
 const VIEWER = MEMBERS[0];
 
 module.exports = {
-  DEMO_DISCORD_GUILD,
+  DEMO_DISCORD_GUILD, DEMO_GUILD_ID,
   ROLE_OFFICER, ROLE_MEMBER, ROLE_RAIDER, ROLE_TRIAL,
   ROLES, MEMBERS, VIEWER,
 };

@@ -30,7 +30,7 @@ const LOOT = require('../../shared/loot.json');
 const SHARDS = require('../../shared/shards.json');
 const { guildTimeOn } = require('../eliteTimers');
 const {
-  DEMO_DISCORD_GUILD, ROLE_OFFICER, ROLE_MEMBER, ROLE_RAIDER, ROLE_TRIAL, MEMBERS,
+  DEMO_DISCORD_GUILD, DEMO_GUILD_ID, ROLE_OFFICER, ROLE_MEMBER, ROLE_RAIDER, ROLE_TRIAL, MEMBERS,
 } = require('./demoFixture');
 
 const argv = process.argv.slice(2);
@@ -114,6 +114,7 @@ async function seed() {
   if (DRY) console.log('\n(dry run — nothing below is written)\n');
 
   const guildRow = {
+    id: DEMO_GUILD_ID,
     discord_guild_id: DEMO_DISCORD_GUILD,
     house: 'House Umbral', tag: 'UMBRA', aliases: ['UMBRA', 'DUSK'],
     motto: 'Last through the dark.',
@@ -149,21 +150,30 @@ async function seed() {
     pvp_classes: m.classes, pve_classes: m.classes, updated_at: iso(),
   })));
 
-  // A zero gear level is a member who has never uploaded — the leaderboard has
-  // to have one or its empty state never shows.
+  // Item level runs 50–80 in Throne & Liberty (gearIlvl.js: MAX_LEVEL = 80), so
+  // the three slots sit within a couple of levels of the average and are clamped
+  // at the cap — a "weapon 118" would be visibly not a real number.
+  //
+  // A zero is a member who has never uploaded: the leaderboard needs one or its
+  // empty state never shows. Two members sit at 80 across the board, which is
+  // what sets `maxed_at`.
+  const lvl = (v) => Math.max(0, Math.min(80, v));
   const geared = MEMBERS.filter((m) => m.gear > 0);
   await insert('gear_levels', geared.map((m) => ({
     ...g, discord_id: m.id, display_name: m.name,
-    weapon: m.gear + 40, armor: m.gear - 20, accessory: m.gear - 10, average: m.gear,
+    weapon: lvl(m.gear + 1), armor: lvl(m.gear - 1), accessory: lvl(m.gear), average: m.gear,
     submitted_at: ago(60 * 24 * (m.n % 9)),
+    maxed_at: m.gear === 80 ? ago(60 * 24 * 11) : null,
   })));
-  // Two prior submissions each, so the gear-progress history has a line to draw.
-  await insert('gear_level_history', geared.flatMap((m) => [30, 10].map((d, i) => ({
-    ...g, discord_id: m.id, display_name: m.name,
-    weapon: m.gear - 80 * (2 - i) + 40, armor: m.gear - 80 * (2 - i) - 20,
-    accessory: m.gear - 80 * (2 - i) - 10, average: m.gear - 80 * (2 - i),
-    submitted_at: ago(60 * 24 * d),
-  }))));
+  // Two earlier submissions each, so the progression chart has a line to draw.
+  await insert('gear_level_history', geared.flatMap((m) => [30, 10].map((d, i) => {
+    const avg = lvl(m.gear - 3 * (2 - i));
+    return {
+      ...g, discord_id: m.id, display_name: m.name,
+      weapon: lvl(avg + 1), armor: lvl(avg - 1), accessory: avg, average: avg,
+      submitted_at: ago(60 * 24 * d),
+    };
+  })));
 
   await insert('shard_counts', MEMBERS.slice(0, 16).map((m) => ({
     ...g, discord_id: m.id, display_name: m.name,
@@ -310,10 +320,14 @@ async function seed() {
   await insert('wargame_maps', ['Ruins of Turayne', 'Windhill Shore', 'Monolith Wastes']
     .map((name) => ({ ...g, name })));
 
+  // 'Win' / 'Loss' are matched CASE-SENSITIVELY when the map record is tallied
+  // (server.js: `m.result === 'Win'`), so lowercase here counts as neither and
+  // every map reads 0 wins, 0 losses, 0% — which is exactly what it looked like
+  // before this was fixed.
   const matches = [
-    { title: 'Ruins of Turayne', date: -12, result: 'win', map: 'Ruins of Turayne' },
-    { title: 'Windhill Shore', date: -6, result: 'loss', map: 'Windhill Shore' },
-    { title: 'Monolith Wastes', date: -1, result: 'win', map: 'Monolith Wastes' },
+    { title: 'Ruins of Turayne', date: -12, result: 'Win', map: 'Ruins of Turayne' },
+    { title: 'Windhill Shore', date: -6, result: 'Loss', map: 'Windhill Shore' },
+    { title: 'Monolith Wastes', date: -1, result: 'Win', map: 'Monolith Wastes' },
   ];
   for (const mt of matches) {
     const [row] = await insert('wargame_matches', {
@@ -325,17 +339,20 @@ async function seed() {
     // the two apart — and it does that by matching guild_name against the
     // tenant's alias list, so 'UMBRA' here is load-bearing.
     await insert('player_match_stats', [
+      // A wargame has exactly two sides, and the app normalises them to 'Red'
+      // and 'Yellow' — anything else (a plausible-looking 'blue', say) is
+      // normalised to empty and that team's whole scoreboard renders as zeros.
       ...MEMBERS.slice(0, 20).map((m, i) => ({
         ...g, match_id: row.id, rank: i + 1, guild_name: 'UMBRA', player_name: m.name,
-        team_color: 'blue',
+        team_color: 'Yellow',
         kills: 30 - i + (m.n % 7), assists: 40 - i, damage_dealt: 4_000_000 - i * 90_000,
         damage_taken: 2_000_000 + i * 40_000, healing: m.role === 'Healer' ? 3_000_000 - i * 50_000 : 120_000,
         created_at: iso(),
       })),
-      ...['Corvid', 'Halvard', 'Ysolde', 'Bram'].map((nm, i) => ({
+      ...['Corvid', 'Halvard', 'Ysolde', 'Bram', 'Ingrid', 'Torsten'].map((nm, i) => ({
         ...g, match_id: row.id, rank: 21 + i, guild_name: 'RIVAL', player_name: nm,
-        team_color: 'red', kills: 18 - i, assists: 22 - i,
-        damage_dealt: 2_400_000 - i * 80_000, damage_taken: 2_600_000, healing: 90_000,
+        team_color: 'Red', kills: 18 - i, assists: 22 - i,
+        damage_dealt: 2_400_000 - i * 80_000, damage_taken: 2_600_000 + i * 30_000, healing: 90_000,
         created_at: iso(),
       })),
     ]);
