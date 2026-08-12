@@ -223,7 +223,13 @@ function NavSection({ title, links, linkClass, collapsed }) {
         {links.map(({ to, label, end, icon: Icon, children }) => {
           // Collapsed rail has no room for a chevron/sub-list — just link
           // straight to the parent page, same as any other icon-only item.
-          if (!children || collapsed) {
+          // An *empty* children array counts as no children: visibleAdminLinks
+          // hands one to every link, and permission filtering can empty a real
+          // parent's. Taking the parent branch with nothing under it draws a
+          // chevron that expands to nothing, and swaps the NavLink's own
+          // `end`-aware highlight for a startsWith() one — which is why Upload
+          // Match (/admin) lit up on every page in the section.
+          if (!children || children.length === 0 || collapsed) {
             return (
               <NavLink key={to} to={to} end={end} className={linkClass} title={collapsed ? label : undefined}>
                 <Icon className="w-4 h-4 shrink-0" />
