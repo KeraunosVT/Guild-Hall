@@ -239,6 +239,7 @@
             <tr><td><code>/loa range</code></td><td>Out across a span of dates</td><td><span class="chip chip-all">Everyone</span></td></tr>
             <tr><td><code>/loa recurring</code></td><td>Out the same weekday every week</td><td><span class="chip chip-all">Everyone</span></td></tr>
             <tr><td><code>/loa cancel</code></td><td>Withdraw an LOA you filed</td><td><span class="chip chip-all">Everyone</span></td></tr>
+            <tr><td><code>/attendance-late</code></td><td>Ask to be added to a night the snapshot missed</td><td><span class="chip chip-all">Everyone</span></td></tr>
             <tr><td><code>/attendance</code></td><td>Snapshot a voice channel into an event's attendance</td><td><span class="chip chip-officer">Officers</span></td></tr>
             <tr><td><code>/announce</code></td><td>Post a countdown announcement with a live timestamp</td><td><span class="chip chip-officer">Officers</span></td></tr>
           </tbody>
@@ -247,7 +248,7 @@
     </div>
 
     <section>
-      <h2>Anyone in the guild <span class="qualifier">— 6 forms</span></h2>
+      <h2>Anyone in the guild <span class="qualifier">— 7 forms</span></h2>
 
       <article class="entry">
         <div class="entry-head">
@@ -384,6 +385,44 @@
           </div>
         </div>
       </article>
+
+      <article class="entry">
+        <div class="entry-head">
+          <span class="signature"><span class="slash">/</span>attendance-late</span>
+          <span class="chip chip-all">Everyone</span>
+        </div>
+        <div class="entry-body">
+          <p>You were there, and the snapshot missed you — you joined comms two minutes late, or Discord
+            dropped your voice state mid-fight. This asks an officer to add you. It doesn't record
+            attendance itself; nobody writes their own.</p>
+          <div class="usage">/attendance-late event:<span class="req">Guild Field Boss — 2026-08-10</span> <span class="opt">reason:Discord dropped me mid-pull</span></div>
+          <div class="args scroller">
+            <table>
+              <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>event</code></td><td><span class="req">required</span></td><td>Suggests only the nights you can still ask about, with how long is left on each.</td></tr>
+                <tr><td><code>reason</code></td><td><span class="opt">optional</span></td><td>Anything that helps an officer decide. They see it beside your name.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="aside">
+            <span class="marker">24 hours</span>
+            <span>Measured from when attendance was <em>taken</em>, not when the event was scheduled. An
+              officer approving a claim about three weeks ago is guessing, and this shouldn't ask them
+              to. Past that, talk to them directly.</span>
+          </div>
+          <div class="aside">
+            <span class="marker">An empty list</span>
+            <span>If nothing is suggested, there's nothing to ask about: either every recent night
+              already has you on it, you've already asked, or the window has closed.</span>
+          </div>
+          <div class="aside">
+            <span class="marker">Either way</span>
+            <span>You get a DM when an officer decides. Denials are recorded too — they stay on the
+              night's record rather than vanishing.</span>
+          </div>
+        </div>
+      </article>
     </section>
 
     <section>
@@ -404,7 +443,7 @@
               <thead><tr><th>Option</th><th></th><th>Notes</th></tr></thead>
               <tbody>
                 <tr><td><code>event</code></td><td><span class="req">required</span></td><td>Which scheduled event this counts toward. Suggests as you type.</td></tr>
-                <tr><td><code>channel</code></td><td><span class="opt">optional</span></td><td>Defaults to the voice channel you're in. Name one to snap a different room.</td></tr>
+                <tr><td><code>channel</code></td><td><span class="opt">optional</span></td><td>Defaults to the voice channel you're in, then to the attendance channel set in Guild Settings. Name one to snap a different room.</td></tr>
                 <tr><td><code>date</code></td><td><span class="opt">optional</span></td><td class="tnum">Defaults to tonight. Use <code>YYYY-MM-DD</code> to backfill.</td></tr>
               </tbody>
             </table>
@@ -413,6 +452,11 @@
             <span class="marker">Timing</span>
             <span>It captures the moment you run it, not the whole night — run it once the group has
               actually assembled.</span>
+          </div>
+          <div class="aside">
+            <span class="marker">The party</span>
+            <span>If a party was saved for that night in the builder, a copy of it is stored on the
+              event. Editing the saved party afterwards won't change what this night says it fielded.</span>
           </div>
         </div>
       </article>

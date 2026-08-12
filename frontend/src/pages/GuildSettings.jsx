@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Save, ShieldAlert, Hash, Clock, Plus, X, Loader2, AlertTriangle, AtSign } from 'lucide-react';
+import { Save, ShieldAlert, Hash, Clock, Plus, X, Loader2, AlertTriangle, AtSign, Volume2 } from 'lucide-react';
 import { useAuth } from '../auth';
 import RestrictedGate from '../components/ui/RestrictedGate';
 import { PageShell } from '../components/ui/PageShell';
@@ -109,6 +109,11 @@ export default function GuildSettings() {
   const [original, setOriginal] = useState(null);
   const [roles, setRoles] = useState([]);
   const [channels, setChannels] = useState([]);
+  // Voice channels, kept in their own list rather than merged into `channels`.
+  // The attendance setting names a channel the bot READS a member list out of;
+  // every other picker on this page names one it POSTS into. One combined list
+  // would let a guild point its LOA announcements at a voice channel.
+  const [voiceChannels, setVoiceChannels] = useState([]);
   // The @everyone role, sent separately from `roles` on purpose — see the
   // comment on GET /api/admin/settings. It belongs in the signup ping picker
   // and in none of the role pickers above it.
@@ -126,6 +131,7 @@ export default function GuildSettings() {
         setOriginal(res.data.settings);
         setRoles(res.data.roles || []);
         setChannels(res.data.channels || []);
+        setVoiceChannels(res.data.voice_channels || []);
         setEveryoneId(res.data.everyone_role_id || '');
       })
       .catch((err) => setError(err.response?.data?.error || 'Could not load settings.'))
@@ -313,6 +319,29 @@ export default function GuildSettings() {
               );
             })}
           </div>
+
+          {/* A VOICE channel, and the only one on this page. Kept visually
+              apart from the grid above for that reason — the others are places
+              the bot writes to, this is the place it reads a member list from
+              when attendance is taken. */}
+          <Field label={<span className="flex items-center gap-1.5"><Volume2 className="w-3 h-3" /> Attendance voice channel</span>}
+            hint="Snapped by /attendance when the officer running it isn't already in a voice channel, and preselected on the Attendance page. Naming a channel on the command always wins.">
+            <select value={form.attendance_voice_channel_id || ''}
+              onChange={(e) => set('attendance_voice_channel_id', e.target.value || null)}
+              className={`${inputClass} md:w-1/2`}>
+              <option value="">— ask every time —</option>
+              {/* Same rule as every other picker here: a stored id the bot
+                  can't currently see stays selectable, so saving during a
+                  Discord outage doesn't quietly clear the setting. */}
+              {form.attendance_voice_channel_id
+                && !voiceChannels.some((c) => c.id === form.attendance_voice_channel_id) && (
+                <option value={form.attendance_voice_channel_id}>
+                  {form.attendance_voice_channel_id} (not visible to the bot)
+                </option>
+              )}
+              {voiceChannels.map((c) => <option key={c.id} value={c.id}>🔊 {c.name}</option>)}
+            </select>
+          </Field>
 
           {/* Not a channel, but it belongs with them: this is the other half of
               "where does a signup announcement go and who does it reach". */}

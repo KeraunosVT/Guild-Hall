@@ -127,6 +127,10 @@ async function seed() {
     loa_channel_id: '810000000000000202',
     announce_channel_id: '810000000000000203',
     signup_channel_id: '810000000000000204',
+    // A VOICE channel — the one the bot reads rather than writes. Set here so
+    // the Attendance page opens with it already chosen, which is what the
+    // setting is for.
+    attendance_voice_channel_id: '810000000000000301',
     signup_mention_role_id: ROLE_RAIDER,
     status: 'active',
   };
@@ -195,24 +199,96 @@ async function seed() {
   ]);
   const sched = (name) => schedule.find((r) => r.name === name) || { id: null };
 
+  // ── The saved party ───────────────────────────────────────────────────────
+  // Seeded BEFORE the attendance history, because an event stores a frozen copy
+  // of the party it ran with and needs one to exist first.
+  //
+  // Two of the eighteen (Wynne, Yestin) are outside the attendance list on
+  // purpose: the party block strikes through anyone who was in a party and not
+  // in the record, and a demo where every name is present never shows it.
+  const partyPicks = [
+    [0, 4, 8, 12, 16, 21],
+    [1, 5, 9, 13, 17, 22],
+    [2, 6, 10, 14, 18, 19],
+  ];
+  const siegeLayout = {
+    parties: partyPicks.map((idxs, i) => ({
+      id: `p${i + 1}`,
+      name: `Party ${i + 1}`,
+      members: idxs.map((k) => ({ id: MEMBERS[k].id, name: MEMBERS[k].name, role: MEMBERS[k].role })),
+    })),
+    absent: [],
+  };
+  const [siegeRoster] = await insert('rosters', {
+    ...g, name: 'Siege — last week', event_date: dayOf(-7),
+    event_schedule_id: sched('Guild Siege').id,
+    layout: siegeLayout,
+    created_at: ago(60 * 24 * 7), updated_at: ago(60 * 24 * 7),
+  });
+
   // ── Attendance history ────────────────────────────────────────────────────
   // Three nights back, with attendance thinning out — enough for the breakdown
   // to have both an excused and an unexcused column to fill.
+  //
+  // The most recent night is deliberately within 24 hours of `now`, so the
+  // member-facing page has a live "Request late attendance" window to show. The
+  // other two are outside it, which is the state most nights are in.
   const past = [
-    { title: 'Guild Siege', days: -7, present: 21 },
+    { title: 'Guild Siege', days: -7, present: 21, roster: siegeRoster },
     { title: 'Archboss — Morokai', days: -4, present: 17 },
-    { title: 'Guild Field Boss', days: -2, present: 14 },
+    // The snapshot misses the demo's own viewer (MEMBERS[0], an officer) on the
+    // most recent night — deliberately, because they signed up for it. That is
+    // the exact case late attendance exists for, and without it the member page
+    // has no live window to show and the button never appears in the demo.
+    { title: 'Guild Field Boss', days: -1, present: 15, skip: 0, takenMinsAgo: 90 },
   ];
+  const events = {};
   for (const p of past) {
+    const takenAgo = p.takenMinsAgo || 60 * 24 * -p.days;
     const [ev] = await insert('events', {
       ...g, title: p.title, event_date: dayOf(p.days),
-      event_schedule_id: sched(p.title).id, created_at: ago(60 * 24 * -p.days),
+      event_schedule_id: sched(p.title).id, created_at: ago(takenAgo),
+      // Frozen copy, not a link — see migrations/saas_004. The roster's own
+      // name travels inside it so the event can still say which party it was
+      // even if the roster is later deleted.
+      ...(p.roster ? { roster_id: p.roster.id, party_layout: { ...siegeLayout, name: p.roster.name } } : {}),
     });
     if (DRY) continue;
-    await insert('event_attendance', MEMBERS.slice(0, p.present).map((m) => ({
-      ...g, event_id: ev.id, discord_id: m.id, display_name: m.name,
-      joined_at: ago(60 * 24 * -p.days),
-    })));
+    events[p.title] = ev;
+    await insert('event_attendance', MEMBERS.slice(0, p.present)
+      .filter((m, k) => k !== p.skip)
+      .map((m) => ({
+        ...g, event_id: ev.id, discord_id: m.id, display_name: m.name,
+        joined_at: ago(takenAgo), source: 'snapshot',
+      })));
+  }
+
+  // ── Late attendance ───────────────────────────────────────────────────────
+  // One of each state the officer queue and the member page can be in: an
+  // approved one (which is why Osian is on the siege list at all, an hour after
+  // everyone else), a pending one waiting on an officer, and a denial — kept on
+  // record, because a denial that deletes itself leaves no answer to "did
+  // anyone look at this".
+  if (!DRY) {
+    const siege = events['Guild Siege'];
+    const fieldBoss = events['Guild Field Boss'];
+    const lateAdded = MEMBERS[14]; // Nerys — outside the field boss's 14 present
+    const [lateRow] = await insert('event_attendance', {
+      ...g, event_id: siege.id, discord_id: MEMBERS[23].id, display_name: MEMBERS[23].name,
+      joined_at: ago(60 * 24 * 7 - 90), source: 'late',
+    });
+    await insert('late_attendance_requests', [
+      { ...g, event_id: siege.id, discord_id: MEMBERS[23].id, display_name: MEMBERS[23].name,
+        reason: 'Joined comms at 9:05 — was in the fight the whole time.',
+        status: 'approved', requested_at: ago(60 * 24 * 7 - 30),
+        decided_by: MEMBERS[0].name, decided_at: ago(60 * 24 * 7 - 90), attendance_id: lateRow.id },
+      { ...g, event_id: fieldBoss.id, discord_id: lateAdded.id, display_name: lateAdded.name,
+        reason: 'Discord dropped my voice state mid-pull.',
+        status: 'pending', requested_at: ago(45) },
+      { ...g, event_id: siege.id, discord_id: MEMBERS[20].id, display_name: MEMBERS[20].name,
+        reason: 'I think I was there?', status: 'denied', requested_at: ago(60 * 24 * 7 - 20),
+        decided_by: MEMBERS[3].name, decided_at: ago(60 * 24 * 7 - 60) },
+    ]);
   }
 
   // ── Leave of absence ──────────────────────────────────────────────────────
@@ -231,6 +307,15 @@ async function seed() {
     { ...g, discord_id: MEMBERS[9].id, display_name: MEMBERS[9].name, type: 'event',
       event_date: dayOf(nextDow(6)), start_time: '20:00', end_time: '22:00',
       reason: 'Late home — can make the 12:30', created_at: ago(600) },
+    // Filed BEFORE a night that has already happened. Every other entry here is
+    // upcoming, which means the attendance table's "LOA" status would never
+    // appear on any past event — the excused column would read empty and look
+    // like the feature does nothing.
+    { ...g, discord_id: MEMBERS[15].id, display_name: MEMBERS[15].name, type: 'event',
+      event_date: dayOf(-1), event_schedule_id: sched('Guild Field Boss').id,
+      reason: 'Family thing — said so on Tuesday', created_at: ago(60 * 24 * 4) },
+    { ...g, discord_id: MEMBERS[17].id, display_name: MEMBERS[17].name, type: 'range',
+      start_date: dayOf(-3), end_date: dayOf(-1), reason: 'Away for the weekend', created_at: ago(60 * 24 * 5) },
   ]);
 
   // ── Signups ───────────────────────────────────────────────────────────────
@@ -238,7 +323,7 @@ async function seed() {
   // over-subscribed so the waitlist is populated, one uncapped and quiet.
   const siegeIn = nextDow(0);
   const bossIn = nextDow(6);
-  const [siege, boss] = await insert('event_signups', [
+  const [siege, boss, pastBoss] = await insert('event_signups', [
     { ...g, event_schedule_id: sched('Guild Siege').id, title: 'Guild Siege',
       starts_at: at(siegeIn, 21, 0), event_date: dayOf(siegeIn),
       capacity: 12, status: 'open', reminder_lead_minutes: 90,
@@ -249,6 +334,15 @@ async function seed() {
       capacity: null, status: 'open', reminder_lead_minutes: null,
       channel_id: '810000000000000204', message_id: '810000000000000901',
       mention_role_id: null, created_by: MEMBERS[3].name, created_at: ago(1500) },
+    // A CLOSED occurrence for the night attendance was last taken. Without one,
+    // the attendance table can never show "No-show (signed up)" or a walk-in —
+    // both of those exist only in the gap between who said they were coming and
+    // who was in the channel, and with no past signup there is no gap.
+    { ...g, event_schedule_id: sched('Guild Field Boss').id, title: 'Guild Field Boss',
+      starts_at: at(-1, 20, 0), event_date: dayOf(-1),
+      capacity: null, status: 'closed', reminder_lead_minutes: null,
+      channel_id: '810000000000000204', message_id: '810000000000000902',
+      mention_role_id: null, created_by: MEMBERS[3].name, created_at: ago(60 * 24 * 2) },
   ]);
 
   if (!DRY) {
@@ -268,6 +362,16 @@ async function seed() {
       .map((idx, i) => ({
         ...g, signup_id: boss.id, discord_id: MEMBERS[idx].id, display_name: MEMBERS[idx].name,
         status: 'going', joined_at: ago(1400 - i * 30), added_by: null,
+      })));
+    // Last night's declarations, against the 14 who were actually in the
+    // channel (MEMBERS 0–13). Indices 15 and 18 said they were coming and
+    // weren't there, which is the "No-show (signed up)" status; index 15 also
+    // filed an LOA afterwards, so that row carries its LOA as mitigation.
+    // Everyone attending who is NOT in this list reads as a walk-in.
+    await insert('event_signup_entries', [0, 1, 2, 3, 4, 5, 6, 15, 18]
+      .map((idx, i) => ({
+        ...g, signup_id: pastBoss.id, discord_id: MEMBERS[idx].id, display_name: MEMBERS[idx].name,
+        status: 'going', joined_at: ago(60 * 24 * 2 - i * 20), added_by: null,
       })));
   }
 
@@ -365,13 +469,6 @@ async function seed() {
     { ...g, location: 'Talandre', killed_at: ago(310), next_spawn_at: at(1, 2, 15),
       reported_by: MEMBERS[13].name, pinged: false, updated_at: ago(310) },
   ]);
-
-  await insert('rosters', {
-    ...g, name: 'Siege — last week', event_date: dayOf(-7),
-    event_schedule_id: sched('Guild Siege').id,
-    layout: { parties: [], note: 'Rebuilt on the night — see attendance' },
-    created_at: ago(60 * 24 * 7), updated_at: ago(60 * 24 * 7),
-  });
 
   // The Raider role gets two capabilities, so the permissions grid has a grant
   // in it and isn't an empty screen with a catalog beside it.

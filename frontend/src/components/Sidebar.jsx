@@ -19,10 +19,13 @@ export const guildLinks = [
 export const memberLinks = [
   { to: '/shards', label: 'Shards', icon: Gem },
   { to: '/loot', label: 'Loot', icon: Package },
-  // Signups and LOA sit next to each other on purpose: they are the two halves
-  // of "will you be there", and a member looking for one often wants the other.
+  // Signups, LOA and Attendance sit together on purpose: they are the three
+  // halves of "will you be there / were you there" from a member's side, and
+  // someone looking for one often wants another. Attendance last, because it
+  // is the only one that looks backwards.
   { to: '/signups', label: 'Signups', icon: CalendarCheck },
   { to: '/loa', label: 'LOA', icon: CalendarOff },
+  { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
   { to: '/classes', label: 'Classes', icon: Layers },
   { to: '/gear', label: 'Gear Level', icon: Gauge },
 ];

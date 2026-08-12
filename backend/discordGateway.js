@@ -9,6 +9,7 @@ const createEliteTimers = require('./eliteTimers');
 const createLoa = require('./loa');
 const createIdentities = require('./identities');
 const createAttendance = require('./attendance');
+const createLateAttendance = require('./lateAttendance');
 const createEventSignups = require('./eventSignups');
 const guildRegistry = require('./guildRegistry');
 
@@ -29,6 +30,11 @@ const announceChannelOf = (g) => (g && g.announce_channel_id) || '';
 // guilds, and an env fallback would drop every tenant's signups into whichever
 // channel the deployment happened to name (see test/leakAudit.js check 5).
 const signupChannelOf = (g) => (g && g.signup_channel_id) || announceChannelOf(g);
+// The one channel the bot READS instead of posting to: the voice channel
+// /attendance snaps when the officer running it isn't standing in one. No
+// fallback to any of the above — they are text channels, and snapping one would
+// silently record an empty night.
+const attendanceVoiceOf = (g) => (g && g.attendance_voice_channel_id) || '';
 const adminRolesOf = (g) => (Array.isArray(g && g.admin_role_ids)
   ? g.admin_role_ids.map(String).filter(Boolean) : []);
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -65,6 +71,7 @@ let eliteTimers = null;
 let loa = null;
 let identities = null;
 let attendance = null;
+let lateAttendance = null;
 let signups = null;
 // Kept so handleInteraction can resolve the tenant registry per interaction;
 // the modules above are built once at boot and no longer carry a guild.
@@ -83,6 +90,7 @@ function wireModules(supabase) {
   identities = supabase ? createIdentities(supabase) : null;
   loa = supabase ? createLoa(supabase, identities) : null;
   attendance = supabase ? createAttendance(supabase) : null;
+  lateAttendance = supabase ? createLateAttendance(supabase, identities) : null;
   signups = supabase ? createEventSignups(supabase, identities) : null;
 }
 
@@ -218,6 +226,27 @@ async function registerCommands() {
     commands.push(attendanceCommand.toJSON());
   }
 
+  if (lateAttendance) {
+    // The member's half of attendance, and the only attendance command that
+    // isn't officers-only. Nothing here writes an attendance record — it files
+    // a request an officer decides on the website.
+    //
+    // No date or channel option: the autocomplete IS the eligibility check, so
+    // the list a member sees is exactly the events they can still ask about.
+    // Anything they could type by hand would have to be re-validated and
+    // refused, which is a worse conversation than an empty list.
+    const lateCommand = new SlashCommandBuilder()
+      .setName('attendance-late')
+      .setDescription('Were you there but not on the list? Ask an officer to add you.')
+      .addStringOption((opt) =>
+        opt.setName('event').setDescription('Which night').setRequired(true).setAutocomplete(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName('reason').setDescription('Anything that helps an officer decide (optional)').setRequired(false)
+      );
+    commands.push(lateCommand.toJSON());
+  }
+
   // No supabase dependency — this just posts a message, so it's always available
   // once the bot itself is running (missing channel/role config is reported at
   // run time instead of skipping registration).
@@ -287,6 +316,7 @@ async function handleInteraction(interaction) {
   if (interaction.commandName === 'elitetimers') return handleList(interaction);
   if (interaction.commandName === 'loa') return handleLoa(interaction);
   if (interaction.commandName === 'attendance') return handleAttendance(interaction);
+  if (interaction.commandName === 'attendance-late') return handleAttendanceLate(interaction);
   if (interaction.commandName === 'announce') return handleAnnounce(interaction);
 }
 
@@ -612,6 +642,7 @@ async function handleLoaCancel(interaction) {
 
 async function handleAutocomplete(interaction) {
   if (interaction.commandName === 'attendance') return autocompleteAttendanceEvent(interaction);
+  if (interaction.commandName === 'attendance-late') return autocompleteLateEvent(interaction);
   if (interaction.commandName !== 'loa') return interaction.respond([]).catch(() => {});
   const sub = interaction.options.getSubcommand();
   if (sub === 'event') return autocompleteLoaEvent(interaction);
@@ -639,6 +670,46 @@ async function autocompleteAttendanceEvent(interaction) {
       };
     });
   await interaction.respond(choices).catch(() => {});
+}
+
+// The eligible-events list is the 24-hour window made visible: only nights
+// still inside it, that this member isn't already credited for, and hasn't
+// already asked about. A member with nothing eligible gets a placeholder rather
+// than an empty box — an empty autocomplete looks like the command is broken,
+// where a sentence explains why there is nothing to pick.
+//
+// Scoped to interaction.guildHall like every other handler, so the list can
+// only ever contain this server's nights.
+async function autocompleteLateEvent(interaction) {
+  if (!lateAttendance) return interaction.respond([]).catch(() => {});
+  let events = [];
+  try {
+    events = await lateAttendance.eligibleEvents(interaction.guildHall, interaction.user.id);
+  } catch (err) {
+    console.error('attendance-late autocomplete error:', err.message);
+    return interaction.respond([]).catch(() => {});
+  }
+  if (!events.length) {
+    return interaction.respond([{ name: '— nothing to request: attendance closes 24h after it is taken —', value: '' }]).catch(() => {});
+  }
+  const focused = interaction.options.getFocused().toLowerCase();
+  const choices = events
+    .map((e) => ({
+      name: `${e.title}${e.event_date ? ` — ${e.event_date}` : ''} (${hoursLeft(e.window_closes_at)} left)`.slice(0, 100),
+      value: e.id,
+    }))
+    .filter((c) => c.name.toLowerCase().includes(focused))
+    .slice(0, 25);
+  await interaction.respond(choices).catch(() => {});
+}
+
+// "3h" / "45m" — how long is left to ask. Rounded down on purpose: a window
+// shown as an hour that closes in fifty minutes is worse than the reverse.
+function hoursLeft(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return 'closing';
+  const mins = Math.floor(ms / 60_000);
+  return mins >= 60 ? `${Math.floor(mins / 60)}h` : `${mins}m`;
 }
 
 async function autocompleteLoaEvent(interaction) {
@@ -713,9 +784,21 @@ async function handleAttendance(interaction) {
   const ev = await attendance.getScheduleEvent(interaction.guildHall, eventScheduleId);
   if (!ev) return interaction.editReply('Unknown event — pick one from the list.');
 
+  // Three ways to say which channel, in order of how specific they are: named
+  // on the command, the one the officer is standing in, and the guild's
+  // configured default. The default is last so it can never override an
+  // explicit choice, and it exists because for most guilds it is the same
+  // channel every single week.
   const channelOpt = interaction.options.getChannel('channel');
-  const channel = channelOpt || interaction.member?.voice?.channel;
-  if (!channel) return interaction.editReply("You're not in a voice channel — specify one with the channel option.");
+  const configured = attendanceVoiceOf(interaction.guildHall);
+  const channel = channelOpt
+    || interaction.member?.voice?.channel
+    || (configured ? interaction.guild?.channels?.cache?.get(configured) : null);
+  if (!channel) {
+    return interaction.editReply(configured
+      ? "You're not in a voice channel, and this server's configured attendance channel is one the bot can't see. Name a channel with the `channel` option, or fix it in Guild Settings."
+      : "You're not in a voice channel — name one with the `channel` option, or set a default attendance voice channel in Guild Settings.");
+  }
 
   const dateInput = interaction.options.getString('date');
   const eventDate = dateInput || createLoa.todayInGuildTz(interaction.guildHall);
@@ -741,6 +824,34 @@ async function handleAttendance(interaction) {
   await interaction.editReply(`${header}${names}`);
 
   notifyAttendance(members, ev.name, eventDate).catch(() => {});
+}
+
+// ── /attendance-late ──────────────────────────────────────────────────────
+// Deliberately NOT gated on isAdminMember: this is the one attendance command
+// every member is meant to run. It writes no attendance record — the officer
+// deciding it does that, on the website.
+async function handleAttendanceLate(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!lateAttendance) return interaction.editReply('Attendance tracking is not configured right now.');
+
+  const eventId = interaction.options.getString('event');
+  if (!eventId) return interaction.editReply('Pick a night from the list — if it was empty, the 24-hour window has closed and you\'ll need to ask an officer directly.');
+
+  try {
+    const filed = await lateAttendance.request(interaction.guildHall, {
+      eventId,
+      // The requester is whoever ran the command. There is no on-behalf-of
+      // option, on purpose — see the header of lateAttendance.js.
+      discordId: interaction.user.id,
+      displayName: interaction.member?.nickname || interaction.user.globalName || interaction.user.username,
+      reason: interaction.options.getString('reason'),
+    });
+    await interaction.editReply(`📝 Asked to be added to **${filed.event_title}**. An officer will approve or deny it — you'll get a DM either way.`);
+  } catch (err) {
+    // Domain errors carry a status and a message written for the member; only
+    // those are shown, so an internal failure never leaks its wording.
+    await interaction.editReply(err.status ? err.message : 'Something went wrong filing that request.');
+  }
 }
 
 // ── /announce ─────────────────────────────────────────────────────────────
@@ -1155,6 +1266,30 @@ async function notifyAttendance(attendees, title, eventDate) {
   }
 }
 
+// Tell one member what an officer decided about their late request.
+//
+// A DM rather than a channel post: a denial is a private matter between the
+// member and the officers, and posting "X was refused attendance" where the
+// guild can read it turns an administrative decision into a public one.
+//
+// The guild row is passed but only used for the message text — the DM goes to
+// a user, not into a channel, so there is nothing here to scope. Best-effort:
+// closed DMs are logged and skipped, never surfaced as a failed decision.
+async function notifyLateAttendance(guildHall, request) {
+  if (!ready || !client || !request) return;
+  const title = (request.event && request.event.title) || 'that event';
+  const dateText = request.event && request.event.event_date ? ` on ${discordDate(request.event.event_date)}` : '';
+  const text = request.status === 'approved'
+    ? `✅ An officer approved your late attendance for **${title}**${dateText} — you're on the list.`
+    : `❌ An officer declined your late attendance request for **${title}**${dateText}. Ask them directly if you think that's wrong.`;
+  try {
+    const user = await client.users.fetch(request.discord_id);
+    await user.send(text);
+  } catch (err) {
+    console.error(`Late attendance DM error for ${request.discord_id}:`, err.message);
+  }
+}
+
 // List voice channels the bot can see.
 function listVoiceChannels(guildHall) {
   const guild = getGuild(guildHall && guildHall.discord_guild_id);
@@ -1197,6 +1332,7 @@ function getVoiceMembers(guildHall, channelId) {
 
 module.exports = {
   start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
+  notifyLateAttendance,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
 };
 
@@ -1227,4 +1363,9 @@ module.exports.__test = {
   signupComponents,
   signupMention,
   runSignupSweep,
+  // /attendance-late is the one member-facing attendance command, so the
+  // question it has to answer under test is the opposite of the others': not
+  // "are officers kept out" but "is one guild's night reachable from another".
+  autocompleteLateEvent,
+  handleAttendanceLate,
 };

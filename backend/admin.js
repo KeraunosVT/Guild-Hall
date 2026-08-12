@@ -9,6 +9,7 @@ const perms = require('./permissions');
 const createLoa = require('./loa');
 const { todayInGuildTz } = createLoa;
 const createAttendance = require('./attendance');
+const createLateAttendance = require('./lateAttendance');
 const createEventSignups = require('./eventSignups');
 const createGuildSettings = require('./guildSettings');
 const SHARDS = require('../shared/shards.json');
@@ -121,6 +122,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   };
 
   const attendance = supabase ? createAttendance(supabase) : null;
+  const lateAttendance = supabase ? createLateAttendance(supabase, identities) : null;
   // identities is passed so LOA names resolve to the site alias, matching
   // what the website and the /loa command show.
   const loa = supabase ? createLoa(supabase, identities) : null;
@@ -1174,23 +1176,64 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     res.json({ members });
   });
 
+  // How far back the attendance page is looking. Shared by /events and
+  // /attendance-stats deliberately: the list and the rate sidebar sit next to
+  // each other, and two copies of this arithmetic is how they come to disagree
+  // about what "the last two weeks" means.
+  //
+  // The cutoff is computed from the guild's own today (loa.todayInGuildTz, which
+  // honours timezone and day_start), not from the server's clock — a night that
+  // ran past midnight belongs to the evening it started in, and a UTC date here
+  // would drop or include that event depending on where the server happens to
+  // be hosted.
+  const WINDOW_DAYS = { 7: 7, 14: 14, 30: 30 };
+  const attendanceWindow = (req) => {
+    const raw = String(req.query.window ?? '30').trim();
+    if (raw === 'all') return { window: 'all', since: null };
+    const days = WINDOW_DAYS[raw] || 30;
+    const [y, m, d] = todayInGuildTz(req.guild).split('-').map(Number);
+    // days - 1 so "7 days" includes today and the six nights before it, rather
+    // than seven nights plus today.
+    const since = new Date(Date.UTC(y, m - 1, d - (days - 1))).toISOString().slice(0, 10);
+    return { window: String(days), since, days };
+  };
+
   router.get('/events', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-    const { data, error } = await dbFor(req)
-      .from('events').select('id, title, event_date, created_at')
+    const { window, since } = attendanceWindow(req);
+
+    let q = dbFor(req)
+      .from('events').select('id, title, event_date, created_at, roster_id')
       .order('event_date', { ascending: false });
+    // An undated event has no night to place in a window, so it only appears
+    // under "all" — silently dropping it from every filtered view would make it
+    // look deleted.
+    if (since) q = q.gte('event_date', since);
+    const { data, error } = await q;
     if (error) return res.status(500).json({ error: 'Failed to load events.' });
 
     const eventIds = (data || []).map((e) => e.id);
     let countMap = {};
+    let withParty = new Set();
     if (eventIds.length > 0) {
-      const { data: att } = await dbFor(req)
-        .from('event_attendance').select('event_id')
-        .in('event_id', eventIds);
+      // party_layout is a whole roster blob per event, far too heavy to project
+      // into a list — so the "has a party" flag comes from a second query that
+      // returns nothing but ids. Asked of party_layout rather than roster_id
+      // because deleting a saved roster nulls the breadcrumb while leaving the
+      // frozen copy intact, and the event does still have its party.
+      const [{ data: att }, { data: parties }] = await Promise.all([
+        dbFor(req).from('event_attendance').select('event_id').in('event_id', eventIds),
+        dbFor(req).from('events').select('id').in('id', eventIds).not('party_layout', 'is', null),
+      ]);
       (att || []).forEach((a) => { countMap[a.event_id] = (countMap[a.event_id] || 0) + 1; });
+      withParty = new Set((parties || []).map((p) => String(p.id)));
     }
 
-    res.json({ events: (data || []).map((e) => ({ ...e, attendees: countMap[e.id] || 0 })) });
+    res.json({
+      window,
+      since,
+      events: (data || []).map((e) => ({ ...e, has_party: withParty.has(String(e.id)), attendees: countMap[e.id] || 0 })),
+    });
   });
 
   router.get('/events/:id', async (req, res) => {
@@ -1291,7 +1334,84 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       }
     }
 
-    res.json({ event, attendees: attendees || [], absences, signup: signupSummary });
+    // ── One row per person, for the table ───────────────────────────────────
+    // Built here rather than in the browser. Everything it needs — who was
+    // present, who was excused, who declared and didn't come — has just been
+    // reconciled above across three sources; handing the frontend those three
+    // lists and asking it to derive the same four-way split is how the page
+    // and the API come to disagree about someone's standing.
+    //
+    // Precedence, highest first:
+    //   attended      — they were in the channel (or a late request was approved)
+    //   noshow_signed — said they were coming and weren't there. Ranked above
+    //                   the LOA bucket because a member who signed up and THEN
+    //                   filed still broke a commitment, and their LOA travels
+    //                   with the row so it can be shown as mitigation.
+    //   loa           — excused, filed in advance
+    //   unexcused     — neither turned up nor said anything
+    const walkIns = new Set((signupSummary && signupSummary.walkIns) || []);
+    const rows = [];
+    (attendees || []).forEach((a) => {
+      rows.push({
+        discord_id: a.discord_id,
+        display_name: a.display_name,
+        status: 'attended',
+        joined_at: a.joined_at,
+        // Where the row came from. Rows written before saas_004 have no
+        // `source`, and those are all snapshots — hence the explicit compare
+        // rather than a truthiness check that would call them late.
+        late: a.source === 'late',
+        walk_in: walkIns.has(String(a.discord_id)),
+        loa: null,
+      });
+    });
+    (signupSummary ? signupSummary.signedUpNoShow : []).forEach((m) => {
+      rows.push({ discord_id: m.discord_id, display_name: m.display_name, status: 'noshow_signed', joined_at: null, late: false, walk_in: false, loa: m.loa || null });
+    });
+    if (absences) {
+      absences.excused.forEach((m) => {
+        rows.push({ discord_id: m.discord_id, display_name: m.display_name, status: 'loa', joined_at: null, late: false, walk_in: false, loa: m.loa });
+      });
+      absences.unexcused.forEach((m) => {
+        rows.push({ discord_id: m.discord_id, display_name: m.display_name, status: 'unexcused', joined_at: null, late: false, walk_in: false, loa: null });
+      });
+    }
+    rows.sort((a, b) => String(a.display_name || '').localeCompare(String(b.display_name || '')));
+
+    // ── The party this night ran with ───────────────────────────────────────
+    // Read off the event, never re-fetched from `rosters`: the point of the
+    // frozen copy is that editing or deleting the roster afterwards leaves this
+    // untouched. Each slot is cross-referenced against the attendance rows,
+    // which is the question the stored party exists to answer — not "who was
+    // meant to be in party 3" but "how much of party 3 actually turned up".
+    let party = null;
+    if (event.party_layout) {
+      const present = new Set((attendees || []).map((a) => String(a.discord_id)));
+      const groups = Array.isArray(event.party_layout.parties) ? event.party_layout.parties : [];
+      party = {
+        roster_id: event.roster_id || null,
+        name: event.party_layout.name || null,
+        parties: groups
+          .filter((p) => (p.members || []).length > 0)
+          .map((p) => ({
+            name: p.name || 'Party',
+            members: (p.members || []).map((m) => ({
+              ...m,
+              attended: present.has(String(m.id)),
+            })),
+          })),
+      };
+    }
+
+    // Every request against this event, decided or not — an officer looking at
+    // a night wants to see that they turned someone down, not just that the
+    // queue is empty. Best-effort: this is context, not the record.
+    const lateRequests = lateAttendance
+      ? await lateAttendance.list(req.guild, { status: 'all', eventId: event.id })
+        .catch((err) => { console.error('Attendance late-request lookup failed:', err.message); return []; })
+      : [];
+
+    res.json({ event, attendees: attendees || [], absences, signup: signupSummary, rows, party, late_requests: lateRequests });
   });
 
   // ── Signups: read-only feed for the party builder ───────────────────────────
@@ -1316,12 +1436,17 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
   router.post('/events', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-    const { title, event_date, event_schedule_id, attendees } = req.body || {};
+    const { title, event_date, event_schedule_id, attendees, roster_id } = req.body || {};
 
     let result;
     try {
       result = await attendance.createEvent(req.guild, {
         title, eventDate: event_date, eventScheduleId: event_schedule_id, attendees,
+        // Undefined means "work it out from the night"; null means the officer
+        // deliberately chose no party. Distinguished rather than collapsed, so
+        // a guild that doesn't use the party builder isn't nagged by an
+        // auto-match it never asked for.
+        rosterId: roster_id,
       });
     } catch (err) {
       return res.status(err.status || 500).json({ error: err.message || 'Failed to create event.' });
@@ -1332,6 +1457,48 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     // Best-effort — DMs go out after responding so a slow/failed Discord send
     // can't delay or break the save itself.
     if (gateway) gateway.notifyAttendance(attendees, title, event_date).catch(() => {});
+  });
+
+  // ── Late attendance: the officer queue ──────────────────────────────────────
+  // Members ask at /api/attendance/late (outside the admin area — asking is not
+  // an officer action); officers decide here. Both paths run through
+  // lateAttendance.js so the 24-hour window and the approve-once guarantee are
+  // stated in exactly one place.
+  //
+  // No new permission key: '/attendance' already maps to 'attendance' in
+  // permissions.js, and adding a key would start it granted to nobody and lock
+  // every granular officer out of a feature they already have rights to.
+  router.get('/attendance/late-requests', async (req, res) => {
+    if (!lateAttendance) return res.status(503).json({ error: 'Database not configured.' });
+    try {
+      res.json({ requests: await lateAttendance.list(req.guild, { status: req.query.status || 'pending' }) });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message || 'Failed to load late requests.' });
+    }
+  });
+
+  router.patch('/attendance/late-requests/:id', async (req, res) => {
+    if (!lateAttendance) return res.status(503).json({ error: 'Database not configured.' });
+    const { status } = req.body || {};
+    let decided;
+    try {
+      decided = await lateAttendance.decide(req.guild, req.params.id, status, {
+        id: req.user.id, name: req.user.username,
+      });
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message || 'Failed to record that decision.' });
+    }
+
+    res.json({ ok: true, status: decided.status });
+
+    // Tell them after answering, never before: Discord is a third party that
+    // can be slow or down, and a successful decision must not look like a
+    // failure because a DM took eight seconds.
+    if (gateway) {
+      gateway.notifyLateAttendance(req.guild, decided).catch((err) => {
+        console.error('Late attendance DM failed:', err.message);
+      });
+    }
   });
 
   // One-time (re-runnable) fix for attendance rows saved before snapshots resolved
@@ -1358,14 +1525,21 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
   router.get('/attendance-stats', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
+    const { window, since } = attendanceWindow(req);
     try {
-      const { data: evts, error: eErr } = await dbFor(req).from('events').select('id');
+      let eq = dbFor(req).from('events').select('id');
+      if (since) eq = eq.gte('event_date', since);
+      const { data: evts, error: eErr } = await eq;
       if (eErr) throw eErr;
       const totalEvents = (evts || []).length;
-      if (totalEvents === 0) return res.json({ totalEvents: 0, members: [] });
+      if (totalEvents === 0) return res.json({ window, since, totalEvents: 0, members: [] });
 
-      const { data: att, error: aErr } = await dbFor(req)
-        .from('event_attendance').select('discord_id, display_name');
+      // Both halves narrowed by the same window, always. Filtering the
+      // denominator without filtering the numerator is how a member ends up
+      // with a 300% attendance rate for the last week.
+      let aq = dbFor(req).from('event_attendance').select('discord_id, display_name');
+      if (since) aq = aq.in('event_id', evts.map((e) => e.id));
+      const { data: att, error: aErr } = await aq;
       if (aErr) throw aErr;
 
       const map = {};
@@ -1379,7 +1553,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
         .map((m) => ({ ...m, rate: Math.round((m.attended / totalEvents) * 100) }))
         .sort((a, b) => b.rate - a.rate || a.display_name.localeCompare(b.display_name));
 
-      res.json({ totalEvents, members });
+      res.json({ window, since, totalEvents, members });
     } catch (err) {
       console.error('Attendance stats error:', err.message);
       res.status(500).json({ error: 'Failed to compute attendance stats.' });
@@ -1529,6 +1703,11 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       listRoles(req.guild).catch((err) => { console.error('settings listRoles failed:', err.message); return []; }),
       Promise.resolve(gateway ? gateway.listTextChannels(req.guild) : []),
     ]);
+    // Sent as its own list, not merged into `channels`. The attendance setting
+    // names a channel the bot reads a member list OUT of, and every other
+    // picker on this page names one it posts INTO — offering the two together
+    // would let a guild point its LOA announcements at a voice channel.
+    const voiceChannels = gateway ? gateway.listVoiceChannels(req.guild) : [];
     // everyone_role_id is this server's @everyone role — its id is the Discord
     // guild id, and listRoles() filters it out on purpose so nobody can hand
     // officer capabilities to the entire server by misclicking. The signup ping
@@ -1539,6 +1718,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       settings: guildSettings.current(req.guild),
       roles,
       channels,
+      voice_channels: voiceChannels,
       everyone_role_id: req.guild.discord_guild_id,
     });
   });

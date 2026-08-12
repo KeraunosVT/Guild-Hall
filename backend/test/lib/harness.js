@@ -90,7 +90,9 @@ const FIXTURE_DISCORD_GUILDS = ['700000000000001111', '700000000000002222'];
 const SCOPED_TABLES = [
   'loot_categories', 'loot_items', 'loot_awards', 'loot_wishlists',
   'wargame_matches', 'wargame_maps', 'player_match_stats',
-  'events', 'event_attendance', 'event_schedule',
+  // late_attendance_requests references events, so it sits after it here and is
+  // therefore deleted before it when purge() reverses the list.
+  'events', 'event_attendance', 'late_attendance_requests', 'event_schedule',
   // Parent before child: entries cascade from signups, and purge() reverses
   // this list, so the order here is what makes the teardown legal.
   'event_signups', 'event_signup_entries',
@@ -177,6 +179,14 @@ async function insertSeed(guildId, m, n, tag) {
     guild_id: guildId, event_id: created.events.id,
     discord_id: `${n}${'1'.padStart(11, '0')}`, display_name: `${m} Player`, joined_at: now,
   });
+  // A pending request from someone OTHER than the attendee above — uid(1) is
+  // already in event_attendance, and lateAttendance.request() refuses to file
+  // for a member who is already credited.
+  await kid('late_attendance_requests', {
+    guild_id: guildId, event_id: created.events.id,
+    discord_id: `${n}${'2'.padStart(11, '0')}`, display_name: `${m} Latecomer`,
+    reason: `${m} reason`, status: 'pending', requested_at: now,
+  });
   // Far-future start time on purpose: the auto-close sweep closes anything that
   // has already begun, and a fixture that closes itself mid-run would make the
   // join/withdraw isolation checks pass for the wrong reason.
@@ -223,6 +233,9 @@ const guildSeed = (house, tag, discordId, tz) => ({
   timezone: tz, day_start: '01:00',
   admin_role_ids: [], allowed_role_ids: [], member_role_ids: [],
   roster_channel_id: `roster-${tag}`, loa_channel_id: `loa-${tag}`, announce_channel_id: `ann-${tag}`,
+  // A voice channel, not a text one — nothing posts here, /attendance reads it.
+  // Distinct per guild so a cross-tenant leak of the setting would be visible.
+  attendance_voice_channel_id: `voice-${tag}`,
 });
 
 // Build both tenants from scratch. Returns everything a test needs.

@@ -69,14 +69,31 @@ const SHOTS = [
     path: '/admin/attendance',
     wait: 'text=Past Events',
     // Expand a logged night: collapsed, this page is a snap form and a list of
-    // dates, and the thing worth showing is the breakdown underneath — who was
-    // excused, who wasn't, and who signed up and then didn't turn up.
+    // dates, and the thing worth showing is the table underneath — who was
+    // there, who was excused, who signed up and then didn't turn up, and when
+    // each row was recorded.
     act: async (p) => {
       await p.locator('button:has-text("Guild Field Boss")').first().click();
       // Scroll the empty snap form off the top. It is the first thing on the
       // page and the least interesting thing on it — left in frame, half the
-      // screenshot is a blank form nobody has filled in.
-      await p.evaluate(() => window.scrollTo({ top: 560, behavior: 'instant' }));
+      // screenshot is a blank form nobody has filled in. Anchored on the
+      // pending-requests heading rather than a pixel count, so the shot doesn't
+      // silently drift the next time the form above it changes height.
+      await p.locator('text=Late attendance').first().scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    // The member's half of the same feature. Worth its own frame: the officer
+    // page shows the record, this shows the one thing a member can do about it.
+    name: 'late-attendance',
+    path: '/attendance',
+    wait: 'text=My Attendance',
+    act: async (p) => {
+      const ask = p.locator('button:has-text("Request late attendance")').first();
+      await ask.waitFor({ timeout: 15_000 });
+      // Opened, so the frame shows what asking actually involves rather than
+      // just a button that might do anything.
+      await ask.click();
     },
   },
   { name: 'war-record', path: '/war-record', wait: 'text=UMBRA' },

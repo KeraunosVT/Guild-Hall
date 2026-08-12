@@ -108,7 +108,7 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
   const stale = (await s.from('guilds').select('id').in('discord_guild_id', FIXTURE_IDS)).data || [];
   if (stale.length) {
     const ids = stale.map((r) => r.id);
-    for (const t of ['event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', ids);
+    for (const t of ['late_attendance_requests', 'events', 'event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', ids);
     await s.from('guilds').delete().in('id', ids);
   }
 
@@ -289,8 +289,54 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
   check('another tenant\'s guild id is treated as an ordinary role',
     mention(rowA, rowB.discord_guild_id).content === `<@&${rowB.discord_guild_id}>`);
 
+  // ── 10 ────────────────────────────────────────────────────────────────────
+  // /attendance-late is the one member-facing attendance command, so the
+  // question here is the mirror image of the officer checks above: not "are
+  // outsiders kept out" but "can a member in one server reach another server's
+  // nights". The command's only input is an event id, and its autocomplete is
+  // what supplies them — so both halves are checked.
+  console.log('\n10. late attendance across tenants');
+  const evA = (await s.from('events').insert({
+    guild_id: rowA.id, title: 'Alpha Night', event_date: '2099-01-01', created_at: new Date().toISOString(),
+  }).select('*').single()).data;
+  const evB = (await s.from('events').insert({
+    guild_id: rowB.id, title: 'Beta Night', event_date: '2099-01-01', created_at: new Date().toISOString(),
+  }).select('*').single()).data;
+
+  // The autocomplete answers through interaction.respond, which the fake
+  // swallows — so it is captured here rather than read out of replies.
+  const offered = [];
+  const ac = makeInteraction({ guildId: rowA.discord_guild_id, command: 'attendance-late' });
+  ac.isAutocomplete = () => true;
+  ac.isChatInputCommand = () => false;
+  ac.respond = async (choices) => { offered.push(...choices); };
+  await gw.__test.handleInteraction(ac);
+  const offeredIds = offered.map((c) => String(c.value));
+  check('a member in A is offered A\'s night', offeredIds.includes(String(evA.id)), JSON.stringify(offeredIds));
+  check('and is not offered B\'s', !offeredIds.includes(String(evB.id)));
+
+  // Naming B's event id explicitly from inside A. The id is a real uuid that
+  // really exists — it is simply not this tenant's, which is the only thing
+  // standing between a member and another guild's attendance record.
+  i = await run(makeInteraction({
+    guildId: rowA.discord_guild_id, command: 'attendance-late', opts: { event: evB.id },
+  }));
+  check('filing against another tenant\'s event is refused',
+    /no longer exists|which event/i.test(i.replies[0] || ''), i.replies[0] || '(no reply)');
+  check('and wrote nothing into guild B', (await rows('late_attendance_requests', rowB.id)).length === 0);
+
+  // The same call against A's own event must work, or the refusal above would
+  // pass for the wrong reason — a command that refuses everything is isolated
+  // and useless.
+  i = await run(makeInteraction({
+    guildId: rowA.discord_guild_id, command: 'attendance-late', opts: { event: evA.id, reason: 'comms dropped' },
+  }));
+  check('filing against its own event succeeds', /Asked to be added/i.test(i.replies[0] || ''), i.replies[0] || '(no reply)');
+  const filedA = await rows('late_attendance_requests', rowA.id);
+  check('the request is stamped with guild A', filedA.length === 1, `${filedA.length} rows`);
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
-  for (const t of ['event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', [rowA.id, rowB.id]);
+  for (const t of ['late_attendance_requests', 'events', 'event_signup_entries', 'event_signups', 'elite_timers', 'loa_entries']) await s.from(t).delete().in('guild_id', [rowA.id, rowB.id]);
   await s.from('guilds').delete().in('id', [rowA.id, rowB.id]);
 
   console.log(`\n${pass} passed, ${fail} failed`);

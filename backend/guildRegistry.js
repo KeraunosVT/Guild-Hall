@@ -39,6 +39,11 @@ const COLUMNS = [
   // no matter what was set, and the settings form would then have saved that
   // undefined back over the real value.
   'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id',
+  // The one channel the bot READS rather than posts to: the voice channel
+  // attendance is snapped from when nobody names another. Same trap as the
+  // channel ids above — forget it here and the setting saves, displays as
+  // empty, and every /attendance still demands to be told a channel.
+  'attendance_voice_channel_id',
   // Which role a new signup announcement pings by default. Same trap as the
   // channel ids above: forget it here and every signup silently pings nobody.
   'signup_mention_role_id', 'status',

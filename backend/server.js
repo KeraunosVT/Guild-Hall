@@ -30,6 +30,7 @@ const createGearIlvl = require('./gearIlvl');
 const createIdentities = require('./identities');
 const createLoa = require('./loa');
 const createEventSignups = require('./eventSignups');
+const createLateAttendance = require('./lateAttendance');
 const createAuditLog = require('./auditLog');
 
 const gearUpload = multer({
@@ -118,6 +119,9 @@ const loa = supabase ? createLoa(supabase, identities) : null;
 // Same identities argument, same reason: a signup has to read the same name on
 // the web page, in the Discord embed, and on a party card.
 const signups = supabase ? createEventSignups(supabase, identities) : null;
+// Same again: a late request names a member, and it must be the same name the
+// attendance table and the officer queue show.
+const lateAttendance = supabase ? createLateAttendance(supabase, identities) : null;
 const auditLog = supabase ? createAuditLog(supabase) : null;
 // Guild resolution needs the client to read the tenant registry, so it's built
 // here alongside the other factories rather than imported as a bare middleware.
@@ -905,6 +909,55 @@ app.delete('/api/signups/:id', async (req, res) => {
     gateway.deleteSignupMessage(req.guild, channelId, messageId);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── LATE ATTENDANCE (member side) ────────────────────────────────────────────
+// "I was there, the snapshot missed me." Attendance is a photograph of a voice
+// channel taken at one instant, and photographs miss people.
+//
+// Same siting as signups and LOA: under the plain /api login wall, because
+// asking is something every member does. The DECIDING half lives in
+// /api/admin/attendance/late-requests, gated on the 'attendance' capability —
+// nobody writes their own attendance record.
+//
+// Every write here is self-attributed. There is deliberately no on-behalf-of
+// path (unlike POST /api/loa): an officer who wants to add someone can approve
+// a request or re-take attendance, and a member filing "on behalf" of another
+// member is indistinguishable from filing for themselves under a borrowed name.
+app.get('/api/attendance/mine', async (req, res) => {
+  if (!lateAttendance) return res.status(503).json({ error: 'Database not configured.' });
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
+  try {
+    res.json({ events: await lateAttendance.listForMember(req.guild, req.user.id, { days }) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Failed to load your attendance.' });
+  }
+});
+
+app.post('/api/attendance/late', async (req, res) => {
+  if (!lateAttendance) return res.status(503).json({ error: 'Database not configured.' });
+  const { event_id, reason } = req.body || {};
+  try {
+    const filed = await lateAttendance.request(req.guild, {
+      eventId: event_id,
+      // Never req.body. The requester is whoever holds the session, full stop.
+      discordId: req.user.id,
+      displayName: req.user.username,
+      reason,
+    });
+    res.json(filed);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Failed to file that request.' });
+  }
+});
+
+app.delete('/api/attendance/late/:id', async (req, res) => {
+  if (!lateAttendance) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json(await lateAttendance.cancel(req.guild, req.params.id, req.user.id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Failed to withdraw that request.' });
   }
 });
 

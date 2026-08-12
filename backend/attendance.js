@@ -22,6 +22,45 @@ function httpError(status, message) {
 // per-guild config (loa, attendance), take the bare id when it only scopes
 // queries (gearIlvl, eliteTimers).
 module.exports = function createAttendance(supabase) {
+  // The party a night ran with, frozen onto the event.
+  //
+  // `rosterId` undefined means "find the one built for this night"; null means
+  // an officer deliberately chose none. The auto-match is on
+  // (event_date, event_schedule_id) — already the join key that lines LOA,
+  // signups and the party builder up on the same night, so a roster found this
+  // way is the roster this event is about.
+  //
+  // What gets stored is a COPY of layout, not the roster's id alone. Rosters
+  // are living documents; a link would let editing next week's parties rewrite
+  // what last week's event says it fielded, and nobody would ever see it
+  // happen.
+  async function freezeParty(db, { rosterId, eventDate, eventScheduleId }) {
+    let row = null;
+    if (rosterId) {
+      // Scoped read: an id from another tenant comes back empty rather than
+      // stamping their roster onto this guild's event.
+      const { data } = await db.from('rosters').select('id, name, layout').eq('id', rosterId).maybeSingle();
+      if (!data) throw httpError(404, 'That saved party no longer exists.');
+      row = data;
+    } else if (rosterId === undefined && eventDate) {
+      let q = db.from('rosters').select('id, name, layout')
+        .eq('event_date', eventDate)
+        .order('updated_at', { ascending: false }).limit(1);
+      // Narrowed to the occurrence when there is one, so two events on the
+      // same night don't both claim the first roster found.
+      if (eventScheduleId) q = q.eq('event_schedule_id', eventScheduleId);
+      const { data } = await q;
+      row = (data && data[0]) || null;
+    }
+    if (!row) return { roster_id: null, party_layout: null };
+    return {
+      roster_id: row.id,
+      // The roster's name lives inside the frozen copy too — the breadcrumb can
+      // be nulled by a delete, and "which party was this" should survive.
+      party_layout: { ...(row.layout || {}), name: row.name || null },
+    };
+  }
+
   return {
     // Every scheduled event, for populating a dropdown/autocomplete. Ordered by
     // the night each belongs to and its position in that night, so the 12:30am
@@ -47,7 +86,7 @@ module.exports = function createAttendance(supabase) {
       return data;
     },
 
-    async createEvent(guild, { title, eventDate, eventScheduleId, attendees }) {
+    async createEvent(guild, { title, eventDate, eventScheduleId, attendees, rosterId }) {
       const db = tenantDb(supabase, guild.id);
       if (!title) throw httpError(400, 'Title is required.');
       if (!Array.isArray(attendees) || attendees.length === 0) {
@@ -56,12 +95,16 @@ module.exports = function createAttendance(supabase) {
 
       const eventId = crypto.randomUUID();
       const now = new Date().toISOString();
+      // Resolved before the insert: a bad roster id should fail the save, not
+      // leave an event behind with no party and no explanation.
+      const party = await freezeParty(db, { rosterId, eventDate, eventScheduleId });
 
       const { error: eErr } = await db.from('events').insert({
         id: eventId, title: String(title).slice(0, 200),
         event_date: eventDate || null,
         event_schedule_id: eventScheduleId || null,
         created_at: now,
+        ...party,
       });
       if (eErr) { console.error('Event insert error:', eErr.message); throw httpError(500, 'Failed to create event.'); }
 

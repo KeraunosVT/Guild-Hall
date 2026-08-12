@@ -1,13 +1,43 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../auth';
-import { RefreshCw, Camera, Trash2, ChevronDown, Users, CalendarDays, Loader2, ArrowUp, ArrowDown, BarChart3, Wand2, CalendarCheck, UserPlus } from 'lucide-react';
-import { fmtTimeEst, guildDayOfWeek, isAfterMidnight } from '../timeUtils';
+import {
+  RefreshCw, Camera, Trash2, ChevronDown, Users, CalendarDays, Loader2, ArrowUp, ArrowDown,
+  BarChart3, Wand2, CalendarCheck, UserPlus, Clock, Swords, Check, X, Inbox,
+} from 'lucide-react';
+import { fmtTimeEst, fmtDatetime, guildDayOfWeek, isAfterMidnight } from '../timeUtils';
 import RestrictedGate from '../components/ui/RestrictedGate';
+import Tabs from '../components/ui/Tabs';
+import { Table, Thead, SortableTh, Tr } from '../components/ui/Table';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const LOA_TYPE_LABEL = { event: 'Out this event', range: 'Away (date range)', recurring: 'Out weekly' };
+
+// The four windows the page can be looked at through. Server-side: the list and
+// the rate sidebar have to agree about what "the last two weeks" means, and the
+// only way to guarantee that is for one place to decide it.
+//
+// "All" is here so the pre-filter behaviour stays reachable — a filter that
+// hides history with no way back is a filter that loses data as far as anyone
+// using it is concerned.
+const WINDOWS = [
+  { key: '7', label: '1 week' },
+  { key: '14', label: '2 weeks' },
+  { key: '30', label: '30 days' },
+  { key: 'all', label: 'All' },
+];
+const WINDOW_LABEL = { 7: 'last 7 days', 14: 'last 14 days', 30: 'last 30 days', all: 'all time' };
+
+// One row per member, one status each. The four are ordered by how much they
+// demand of an officer reading them, not alphabetically.
+const STATUS_META = {
+  attended: { label: 'Attended', className: 'border-emerald-400/40 text-emerald-400' },
+  noshow_signed: { label: "No-show (signed up)", className: 'border-oxblood/60 text-bone bg-oxblooddeep/20' },
+  loa: { label: 'LOA', className: 'border-brass/40 text-brass' },
+  unexcused: { label: 'Unexcused', className: 'border-line text-ash' },
+};
+const STATUS_ORDER = { attended: 0, noshow_signed: 1, loa: 2, unexcused: 3 };
 
 // Tooltip text for an excused absence: the window if the LOA had one, otherwise
 // what kind it was, plus the reason.
@@ -21,26 +51,147 @@ function loaReason(loa) {
   return loa.reason ? `${when} — ${loa.reason}` : when;
 }
 
-function NameGroup({ label, tone, children }) {
+function StatusPill({ status }) {
+  const meta = STATUS_META[status] || STATUS_META.unexcused;
   return (
-    <div>
-      <div className={`eyebrow text-[10px] mb-2 ${tone}`}>{label}</div>
-      <div className="flex flex-wrap gap-2">{children}</div>
-    </div>
+    <span className={`inline-flex items-center text-[11px] font-medium border rounded-full px-2.5 py-0.5 whitespace-nowrap ${meta.className}`}>
+      {meta.label}
+    </span>
   );
 }
 
-function NameChip({ children, className = '', title }) {
+// The facts that aren't a status but change how one reads: they came without
+// signing up, or they were added after the fact. Small, next to the name,
+// rather than as statuses of their own — a walk-in attended, full stop.
+function Badge({ children, title, className }) {
   return (
-    <span title={title}
-      className={`inline-flex items-center gap-1.5 text-sm bg-hall border rounded-full px-3 py-1 ${className || 'border-line text-ash'}`}>
+    <span title={title} className={`inline-flex items-center gap-1 text-[10px] eyebrow border rounded-full px-1.5 py-0.5 ${className}`}>
       {children}
     </span>
   );
 }
 
+// ── The per-event table ──────────────────────────────────────────────────────
+// Rows arrive already bucketed from GET /api/admin/events/:id. Deriving the
+// four-way split here from the attendees / absences / signup lists would mean
+// two implementations of the same reconciliation, and they would disagree the
+// first time one of them changed.
+function AttendanceTable({ rows }) {
+  // Alphabetical by default, because this is a roll and the question asked of
+  // it most often is "what does it say about X". Sorting by status instead
+  // groups all fourteen who turned up at the top and pushes the handful of
+  // exceptions below the fold, where they are the only rows anyone needed.
+  const [sort, setSort] = useState('name');
+  const [dir, setDir] = useState('asc');
+
+  const sorted = useMemo(() => {
+    const mult = dir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (sort === 'name') return String(a.display_name || '').localeCompare(String(b.display_name || '')) * mult;
+      if (sort === 'time') {
+        // Nobody has a time unless they were there, so absentees sort to the
+        // end either way rather than clustering at whichever end 0 lands on.
+        if (!a.joined_at && !b.joined_at) return 0;
+        if (!a.joined_at) return 1;
+        if (!b.joined_at) return -1;
+        return (new Date(a.joined_at) - new Date(b.joined_at)) * mult;
+      }
+      return ((STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)) * mult
+        || String(a.display_name || '').localeCompare(String(b.display_name || ''));
+    });
+  }, [rows, sort, dir]);
+
+  const onSort = (key) => {
+    if (sort === key) setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSort(key); setDir(key === 'name' || key === 'status' ? 'asc' : 'desc'); }
+  };
+
+  return (
+    <Table maxHeight="max-h-[520px]" minWidth="min-w-[520px]">
+      <Thead sticky>
+        <SortableTh label="Name" sortKey="name" activeKey={sort} dir={dir} onSort={onSort} dense />
+        <SortableTh label="Status" sortKey="status" activeKey={sort} dir={dir} onSort={onSort} dense />
+        <SortableTh label="Attendance taken" sortKey="time" activeKey={sort} dir={dir} onSort={onSort} dense align="right" />
+      </Thead>
+      <tbody>
+        {sorted.map((r) => (
+          <Tr key={`${r.status}:${r.discord_id}`}>
+            <td className="p-2.5">
+              <span className="flex items-center gap-2 flex-wrap">
+                <span className="text-bone">{r.display_name}</span>
+                {r.walk_in && (
+                  <Badge title="Turned up without signing up" className="border-line text-ash">
+                    <UserPlus className="w-2.5 h-2.5" /> Walk-in
+                  </Badge>
+                )}
+                {r.late && (
+                  <Badge title="Added afterwards by an approved late-attendance request" className="border-brass/40 text-brass">
+                    <Clock className="w-2.5 h-2.5" /> Late
+                  </Badge>
+                )}
+                {/* A member who signed up and THEN filed an LOA sits in the
+                    no-show bucket, but the LOA is mitigation and travels with
+                    the row rather than being dropped. */}
+                {r.status === 'noshow_signed' && r.loa && (
+                  <Badge title={loaReason(r.loa)} className="border-brass/40 text-brass">LOA</Badge>
+                )}
+              </span>
+            </td>
+            <td className="p-2.5">
+              <span title={r.status === 'loa' ? loaReason(r.loa) : undefined}>
+                <StatusPill status={r.status} />
+              </span>
+            </td>
+            {/* Absentees have no timestamp, and an em dash says that more
+                honestly than a blank cell or a borrowed event date. */}
+            <td className="p-2.5 text-right whitespace-nowrap text-xs text-ash font-mono">
+              {r.joined_at ? fmtDatetime(r.joined_at) : '—'}
+            </td>
+          </Tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+// ── The party the night ran with ─────────────────────────────────────────────
+// A frozen copy stored on the event, not a live read of the saved roster — so
+// this keeps showing what was actually fielded even after the roster is
+// reshuffled for next week. Each name is checked against the attendance rows,
+// which is the question worth asking: not who was meant to be in party 3, but
+// how much of party 3 turned up.
+function PartyBlock({ party }) {
+  const total = party.parties.reduce((n, p) => n + p.members.length, 0);
+  const showed = party.parties.reduce((n, p) => n + p.members.filter((m) => m.attended).length, 0);
+  return (
+    <div>
+      <div className="eyebrow text-[10px] text-brass mb-2 flex items-center gap-2">
+        <Swords className="w-3 h-3" />
+        Party fielded{party.name ? ` — ${party.name}` : ''}
+        <span className="text-ash normal-case tracking-normal">({showed} of {total} turned up)</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {party.parties.map((p, i) => (
+          <div key={`${p.name}-${i}`} className="border border-line rounded-lg p-3">
+            <div className="eyebrow text-[10px] text-ash mb-2">{p.name}</div>
+            <ul className="space-y-1">
+              {p.members.map((m) => (
+                <li key={m.id || m.name}
+                  className={`text-sm ${m.attended ? 'text-bone' : 'text-ash line-through decoration-oxblood/60'}`}
+                  title={m.attended ? undefined : 'In the party, not in the attendance record'}>
+                  {m.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Attendance() {
-  const { user, can } = useAuth();
+  const { can } = useAuth();
 
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState('');
@@ -49,10 +200,13 @@ export default function Attendance() {
   const [eventScheduleId, setEventScheduleId] = useState('');
   const [title, setTitle] = useState('');
   const [eventDate, setEventDate] = useState('');
+  const [rosters, setRosters] = useState([]);
+  const [rosterId, setRosterId] = useState('auto');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState(null);
 
+  const [window_, setWindow_] = useState('30');
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [expanded, setExpanded] = useState(null);
@@ -64,41 +218,72 @@ export default function Attendance() {
   const [statDir, setStatDir] = useState('desc');
   const [backfilling, setBackfilling] = useState(false);
 
-  const loadChannels = () => {
+  const [lateRequests, setLateRequests] = useState([]);
+  const [deciding, setDeciding] = useState('');
+
+  const flash = (text, ok = true) => { setMsg({ text, ok }); setTimeout(() => setMsg(null), 4000); };
+
+  const loadChannels = useCallback(() => {
     axios.get('/api/admin/voice-channels')
       .then((res) => setChannels(res.data.channels || []))
       .catch(() => setChannels([]));
-  };
+  }, []);
 
-  const loadEvents = () => {
+  // The list and the rate sidebar are refetched together, always, and both are
+  // handed the same window. Filtering one without the other is how a member
+  // ends up with a rate above 100%.
+  const loadEvents = useCallback(() => {
     setLoadingEvents(true);
-    axios.get('/api/admin/events')
+    axios.get('/api/admin/events', { params: { window: window_ } })
       .then((res) => setEvents(res.data.events || []))
       .catch((err) => setError(err.response?.data?.error || 'Could not load events.'))
       .finally(() => setLoadingEvents(false));
-  };
+  }, [window_]);
 
-  const loadStats = () => {
+  const loadStats = useCallback(() => {
     setLoadingStats(true);
-    axios.get('/api/admin/attendance-stats')
+    axios.get('/api/admin/attendance-stats', { params: { window: window_ } })
       .then((res) => setStats(res.data || { totalEvents: 0, members: [] }))
       .catch(() => {})
       .finally(() => setLoadingStats(false));
-  };
+  }, [window_]);
 
-  const loadSchedule = () => {
-    axios.get('/api/event-schedule')
-      .then((res) => setSchedule(res.data.schedule || []))
-      .catch(() => setSchedule([]));
-  };
+  const loadLate = useCallback(() => {
+    axios.get('/api/admin/attendance/late-requests', { params: { status: 'pending' } })
+      .then((res) => setLateRequests(res.data.requests || []))
+      .catch(() => setLateRequests([]));
+  }, []);
 
-  useEffect(() => { loadChannels(); loadEvents(); loadStats(); loadSchedule(); }, []);
+  useEffect(() => {
+    axios.get('/api/event-schedule').then((res) => setSchedule(res.data.schedule || [])).catch(() => setSchedule([]));
+    axios.get('/api/admin/rosters').then((res) => setRosters(res.data.rosters || [])).catch(() => setRosters([]));
+    // Preselect the guild's configured attendance channel. It is the same
+    // channel every week for most guilds, and picking it by hand every time is
+    // the single most repeated action on this page.
+    axios.get('/api/admin/settings')
+      .then((res) => {
+        const id = res.data?.settings?.attendance_voice_channel_id;
+        if (id) setSelectedChannel(id);
+      })
+      .catch(() => {}); // an officer without the 'settings' capability just picks manually
+    loadChannels();
+    loadLate();
+  }, [loadChannels, loadLate]);
 
-  if (!can('attendance')) {
-    return <RestrictedGate />;
-  }
+  useEffect(() => { loadEvents(); loadStats(); }, [loadEvents, loadStats]);
 
-  const flash = (text, ok = true) => { setMsg({ text, ok }); setTimeout(() => setMsg(null), 4000); };
+  const sortedStats = useMemo(() => {
+    const dir = statDir === 'asc' ? 1 : -1;
+    return [...stats.members].sort((a, b) => {
+      if (statSort === 'name') return a.display_name.localeCompare(b.display_name) * dir;
+      return ((a[statSort] || 0) - (b[statSort] || 0)) * dir;
+    });
+  }, [stats.members, statSort, statDir]);
+
+  // Every hook is above this line on purpose. It used to sit higher up, which
+  // made the hook count depend on a capability check — legal only for as long
+  // as nobody's permissions changed mid-session.
+  if (!can('attendance')) return <RestrictedGate />;
 
   const backfillNames = async () => {
     setBackfilling(true);
@@ -140,9 +325,13 @@ export default function Attendance() {
     try {
       const res = await axios.post('/api/admin/events', {
         title, event_date: eventDate || null, event_schedule_id: eventScheduleId || null, attendees: snapped,
+        // 'auto' means omit the field entirely, which is what tells the server
+        // to look for the roster built for this night. Sending null instead
+        // would read as "deliberately no party".
+        ...(rosterId === 'auto' ? {} : { roster_id: rosterId || null }),
       });
       flash(`Saved — ${res.data.attendees} attendees logged.`);
-      setSnapped([]); setTitle(''); setEventDate(''); setEventScheduleId('');
+      setSnapped([]); setTitle(''); setEventDate(''); setEventScheduleId(''); setRosterId('auto');
       loadEvents(); loadStats();
     } catch (err) {
       flash(err.response?.data?.error || 'Could not save event.', false);
@@ -164,37 +353,59 @@ export default function Attendance() {
     }
   };
 
+  const loadDetail = async (id) => {
+    const res = await axios.get(`/api/admin/events/${id}`);
+    setDetail((d) => ({
+      ...d,
+      [id]: {
+        // rows is the table; signup survives because the summary line below it
+        // (how many declared, how many of those turned up) has no equivalent in
+        // a per-member view.
+        rows: res.data.rows || [],
+        attendees: res.data.attendees || [],
+        signup: res.data.signup || null,
+        party: res.data.party || null,
+        lateRequests: res.data.late_requests || [],
+      },
+    }));
+  };
+
   const toggleEvent = async (id) => {
     if (expanded === id) { setExpanded(null); return; }
     setExpanded(id);
     if (detail[id]) return;
     try {
-      const res = await axios.get(`/api/admin/events/${id}`);
-      // absences is best-effort server-side (needs a dated event and Discord),
-      // so it may be null even when attendees loaded fine. `signup` is null
-      // whenever nobody opened signups for that occurrence, which is most of
-      // the historical log — the section simply doesn't render.
-      setDetail((d) => ({
-        ...d,
-        [id]: {
-          attendees: res.data.attendees || [],
-          absences: res.data.absences || null,
-          signup: res.data.signup || null,
-        },
-      }));
+      await loadDetail(id);
     } catch {
       flash('Could not load attendees.', false);
       setExpanded(null);
     }
   };
 
-  const sortedStats = useMemo(() => {
-    const dir = statDir === 'asc' ? 1 : -1;
-    return [...stats.members].sort((a, b) => {
-      if (statSort === 'name') return a.display_name.localeCompare(b.display_name) * dir;
-      return ((a[statSort] || 0) - (b[statSort] || 0)) * dir;
-    });
-  }, [stats.members, statSort, statDir]);
+  const decide = async (req, status) => {
+    setDeciding(req.id);
+    try {
+      await axios.patch(`/api/admin/attendance/late-requests/${req.id}`, { status });
+      flash(status === 'approved'
+        ? `${req.display_name} added to ${req.event?.title || 'that event'}.`
+        : `Declined ${req.display_name}'s request.`);
+      setLateRequests((prev) => prev.filter((r) => r.id !== req.id));
+      // An approval writes an attendance row, so anything already on screen
+      // showing that event is now stale.
+      if (status === 'approved') {
+        loadEvents(); loadStats();
+        if (expanded === req.event_id) await loadDetail(req.event_id).catch(() => {});
+        else setDetail((d) => { const n = { ...d }; delete n[req.event_id]; return n; });
+      }
+    } catch (err) {
+      flash(err.response?.data?.error || 'Could not record that decision.', false);
+      // A 409 means someone else decided it — refetch rather than leave a
+      // button that will keep failing.
+      if (err.response?.status === 409) loadLate();
+    } finally {
+      setDeciding('');
+    }
+  };
 
   const toggleStatSort = (key) => {
     if (statSort === key) setStatDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -307,6 +518,20 @@ export default function Attendance() {
               className="w-full bg-panel border border-line rounded-lg px-4 py-2.5 text-bone focus:outline-none focus:border-brass"
             />
           </div>
+          <div>
+            <label className="eyebrow text-[10px] text-ash block mb-2">Party fielded</label>
+            <select
+              value={rosterId} onChange={(e) => setRosterId(e.target.value)}
+              className="w-full bg-panel border border-line rounded-lg px-4 py-2.5 text-bone focus:outline-none focus:border-brass"
+            >
+              <option value="auto">— match this night automatically —</option>
+              <option value="">— no party —</option>
+              {rosters.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}{r.event_date ? ` (${r.event_date})` : ''}</option>
+              ))}
+            </select>
+            <p className="text-ash/50 text-xs mt-1">A copy is stored on the event, so editing the saved party later won't change this record.</p>
+          </div>
           <button
             onClick={save} disabled={saving || snapped.length === 0}
             className="w-full px-6 py-3 bg-brass hover:bg-brassbright text-ink font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -316,35 +541,83 @@ export default function Attendance() {
         </div>
       </div>
 
+      {/* ── Late attendance queue ─────────────────────────────────── */}
+      {/* Hidden entirely when empty. A permanent "0 pending" panel above the
+          part of the page officers actually use is a cost paid on every visit
+          for information that matters on a few of them. */}
+      {lateRequests.length > 0 && (
+        <div className="mb-12">
+          <h2 className="font-display text-2xl text-bone tracking-[0.08em] flex items-center gap-3">
+            <Inbox className="w-5 h-5 text-brass" />
+            Late attendance
+            <span className="text-sm font-sans text-brass">{lateRequests.length} waiting</span>
+          </h2>
+          <div className="rule-fade mb-6" />
+          <div className="panel rounded-lg divide-y divide-line">
+            {lateRequests.map((r) => (
+              <div key={r.id} className="flex items-center gap-4 px-5 py-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="text-bone">
+                    <span className="font-medium">{r.display_name}</span>
+                    <span className="text-ash"> — {r.event?.title || 'an event that no longer exists'}</span>
+                    {r.event?.event_date && <span className="text-ash text-xs"> · {r.event.event_date}</span>}
+                  </div>
+                  {r.reason && <div className="text-sm text-ash mt-0.5 italic">“{r.reason}”</div>}
+                  <div className="text-xs text-ash/60 mt-0.5">Asked {fmtDatetime(r.requested_at)}</div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => decide(r, 'approved')} disabled={deciding === r.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-emerald-400/40 text-emerald-400 hover:bg-panelup transition-colors disabled:opacity-40"
+                  >
+                    {deciding === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Approve
+                  </button>
+                  <button
+                    onClick={() => decide(r, 'denied')} disabled={deciding === r.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-line text-ash hover:text-oxblood transition-colors disabled:opacity-40"
+                  >
+                    <X className="w-3.5 h-3.5" /> Deny
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Past events + Attendance sidebar ─────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8">
         {/* Event list */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-display text-2xl text-bone tracking-[0.08em]">Past Events</h2>
-            <button onClick={loadEvents} className="inline-flex items-center gap-2 text-sm text-ash hover:text-brass">
+            <button onClick={() => { loadEvents(); loadStats(); }} className="inline-flex items-center gap-2 text-sm text-ash hover:text-brass">
               <RefreshCw className="w-4 h-4" />
             </button>
           </div>
-          <div className="rule-fade mb-6" />
+          <div className="rule-fade mb-4" />
+
+          <Tabs
+            variant="flat" active={window_} onChange={setWindow_}
+            items={WINDOWS.map((w) => ({
+              // Only the active tab can carry a count — the others' totals
+              // aren't loaded, and a guessed number is worse than none.
+              key: w.key,
+              label: w.key === window_ ? `${w.label} (${events.length})` : w.label,
+            }))}
+          />
 
           {loadingEvents ? (
             <div className="py-16 text-center text-ash">Reading the rolls…</div>
           ) : events.length === 0 ? (
-            <div className="py-16 text-center text-ash">No events logged yet.</div>
+            <div className="py-16 text-center text-ash">
+              {window_ === 'all' ? 'No events logged yet.' : `Nothing logged in the ${WINDOW_LABEL[window_]}.`}
+            </div>
           ) : (
             <div className="panel rounded-lg divide-y divide-line">
               {events.map((ev) => {
                 const isOpen = expanded === ev.id;
                 const info = detail[ev.id];
-                const attendees = info?.attendees;
-                const absences = info?.absences;
-                const signup = info?.signup;
-                // Turned up without signing up. Marked on the attendee chip
-                // rather than pulled into a group of its own — they came, which
-                // is the thing that matters; the marker only shows how much of
-                // the turnout the signup list actually predicted.
-                const walkIns = new Set(signup?.walkIns || []);
                 return (
                   <div key={ev.id}>
                     <button
@@ -361,6 +634,11 @@ export default function Attendance() {
                           <span className="inline-flex items-center gap-1">
                             <Users className="w-3 h-3" /> {ev.attendees}
                           </span>
+                          {ev.has_party && (
+                            <span className="inline-flex items-center gap-1 text-brass/70" title="A party was recorded for this night">
+                              <Swords className="w-3 h-3" />
+                            </span>
+                          )}
                         </div>
                       </div>
                       <button
@@ -373,79 +651,44 @@ export default function Attendance() {
                     </button>
 
                     {isOpen && (
-                      <div className="px-5 pb-4 space-y-4">
-                        {!attendees ? (
+                      <div className="px-5 pb-5 space-y-4">
+                        {!info ? (
                           <div className="py-4 text-center text-ash"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading…</div>
+                        ) : info.rows.length === 0 ? (
+                          <div className="py-4 text-center text-ash">No attendance recorded.</div>
                         ) : (
                           <>
-                            {attendees.length === 0 ? (
-                              <div className="py-4 text-center text-ash">No attendees recorded.</div>
-                            ) : (
-                              <NameGroup label={`Attended (${attendees.length})`} tone="text-ash">
-                                {attendees.map((a) => (
-                                  <NameChip key={a.id}
-                                    title={walkIns.has(a.discord_id) ? 'Walk-in — turned up without signing up' : undefined}
-                                    className={walkIns.has(a.discord_id) ? 'border-line text-ash' : ''}>
-                                    {a.display_name}
-                                    {walkIns.has(a.discord_id) && <UserPlus className="w-3 h-3 text-brass/70" />}
-                                  </NameChip>
-                                ))}
-                              </NameGroup>
-                            )}
+                            <AttendanceTable rows={info.rows} />
 
-                            {/* Ranked above the generic no-LOA group below,
-                                because it's a stronger signal: someone who never
-                                answered may not have seen the post, where
-                                someone who clicked "I'm in" made a commitment.
-                                This is the whole payoff of keeping signups and
-                                attendance as two records that get joined rather
-                                than one that gets overwritten. */}
-                            {signup?.signedUpNoShow?.length > 0 && (
-                              <NameGroup
-                                label={`Signed up, didn't show (${signup.signedUpNoShow.length})`}
-                                tone="text-oxblood"
-                              >
-                                {signup.signedUpNoShow.map((m) => (
-                                  <NameChip key={m.discord_id} className="border-oxblood/60 text-bone"
-                                    title={m.loa ? `Filed an LOA after signing up — ${loaReason(m.loa)}` : 'Declared attendance but was not in the channel'}>
-                                    {m.display_name}
-                                    {m.loa && <span className="text-brass text-[10px]">LOA</span>}
-                                  </NameChip>
-                                ))}
-                              </NameGroup>
-                            )}
-
-                            {signup && (
+                            {info.signup && (
                               <div className="flex items-center gap-2 text-xs text-ash">
                                 <CalendarCheck className="w-3.5 h-3.5 text-brass" />
                                 <span>
-                                  {signup.counts.going} signed up{signup.capacity ? ` of ${signup.capacity}` : ''}
-                                  {' · '}{attendees.length - walkIns.size} of them turned up
-                                  {walkIns.size > 0 && ` · ${walkIns.size} walk-in${walkIns.size === 1 ? '' : 's'}`}
+                                  {info.signup.counts.going} signed up{info.signup.capacity ? ` of ${info.signup.capacity}` : ''}
+                                  {' · '}{info.attendees.length - (info.signup.walkIns?.length || 0)} of them turned up
+                                  {info.signup.walkIns?.length > 0 && ` · ${info.signup.walkIns.length} walk-in${info.signup.walkIns.length === 1 ? '' : 's'}`}
                                 </span>
                               </div>
                             )}
 
-                            {/* Absences are only computable for a dated event,
-                                and only worth showing when someone is missing. */}
-                            {absences?.excused.length > 0 && (
-                              <NameGroup label={`Excused — LOA on file (${absences.excused.length})`} tone="text-brass">
-                                {absences.excused.map((m) => (
-                                  <NameChip key={m.discord_id} title={loaReason(m.loa)} className="border-brass/30 text-brass">
-                                    {m.display_name}
-                                  </NameChip>
+                            {/* Decided requests, so an officer can see that
+                                someone was turned down rather than only that
+                                the queue is empty. */}
+                            {info.lateRequests.filter((r) => r.status !== 'pending').length > 0 && (
+                              <div className="text-xs text-ash space-y-0.5">
+                                {info.lateRequests.filter((r) => r.status !== 'pending').map((r) => (
+                                  <div key={r.id}>
+                                    <span className={r.status === 'approved' ? 'text-emerald-400' : 'text-oxblood'}>
+                                      {r.status === 'approved' ? 'Approved' : 'Denied'}
+                                    </span>
+                                    {' '}late attendance for <span className="text-bone">{r.display_name}</span>
+                                    {r.decided_by && ` — ${r.decided_by}`}
+                                  </div>
                                 ))}
-                              </NameGroup>
+                              </div>
                             )}
-                            {absences?.unexcused.length > 0 && (
-                              <NameGroup label={`No-show — no LOA filed (${absences.unexcused.length})`} tone="text-oxblood">
-                                {absences.unexcused.map((m) => (
-                                  <NameChip key={m.discord_id} className="border-oxblood/40 text-bone">
-                                    {m.display_name}
-                                  </NameChip>
-                                ))}
-                              </NameGroup>
-                            )}
+
+                            {info.party && <PartyBlock party={info.party} />}
                           </>
                         )}
                       </div>
@@ -463,14 +706,16 @@ export default function Attendance() {
             <div className="eyebrow text-[10px] text-brass flex items-center gap-2 mb-1">
               <BarChart3 className="w-3.5 h-3.5" /> Attendance Rate
             </div>
+            {/* The window is named here, not just in the tab above, because a
+                percentage read out of context is assumed to be all-time. */}
             <div className="text-xs text-ash mb-4">
-              {stats.totalEvents} event{stats.totalEvents === 1 ? '' : 's'} tracked
+              {stats.totalEvents} event{stats.totalEvents === 1 ? '' : 's'} · {WINDOW_LABEL[window_]}
             </div>
 
             {loadingStats ? (
               <div className="py-8 text-center text-ash"><Loader2 className="w-4 h-4 animate-spin inline" /></div>
             ) : sortedStats.length === 0 ? (
-              <p className="text-ash text-sm py-4">No attendance data yet.</p>
+              <p className="text-ash text-sm py-4">No attendance in this window.</p>
             ) : (
               <>
                 <div className="flex items-center gap-1 text-[10px] eyebrow text-ash mb-2 px-1">

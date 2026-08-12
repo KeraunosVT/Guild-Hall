@@ -26,6 +26,7 @@ import Attendance from './pages/Attendance';
 import PlayerProfile from './pages/PlayerProfile';
 import LOA from './pages/LOA';
 import Signups from './pages/Signups';
+import MyAttendance from './pages/MyAttendance';
 import Classes from './pages/Classes';
 import GearLevel from './pages/GearLevel';
 import GearLevels from './pages/GearLevels';
@@ -124,6 +125,10 @@ function Gate() {
           {/* Member page with officer controls gated inline, same as /loa —
               not under /admin, because signing up is something everyone does. */}
           <Route path="/signups" element={<Signups />} />
+          {/* The member's own attendance and the late-request button. The
+              officer surface is /admin/attendance — a different page, because
+              taking attendance and asking about it are different jobs. */}
+          <Route path="/attendance" element={<MyAttendance />} />
           <Route path="/classes" element={<Classes />} />
           <Route path="/gear" element={<GearLevel />} />
           <Route path="/admin" element={<Admin />} />

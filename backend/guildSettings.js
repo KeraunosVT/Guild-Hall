@@ -26,6 +26,7 @@ const EDITABLE = [
   'timezone', 'day_start',
   'admin_role_ids', 'allowed_role_ids', 'member_role_ids',
   'roster_channel_id', 'loa_channel_id', 'announce_channel_id', 'signup_channel_id',
+  'attendance_voice_channel_id',
   'signup_mention_role_id',
 ];
 
@@ -197,6 +198,10 @@ module.exports = function createGuildSettings(supabase) {
         loa_channel_id: channelId(b.loa_channel_id, 'LOA channel'),
         announce_channel_id: channelId(b.announce_channel_id, 'Announce channel'),
         signup_channel_id: channelId(b.signup_channel_id, 'Signup channel'),
+        // A VOICE channel — the only one here that is. Same snowflake shape, so
+        // the same validator; the difference is which list the picker offers,
+        // which is the settings route's job, not this one's.
+        attendance_voice_channel_id: channelId(b.attendance_voice_channel_id, 'Attendance voice channel'),
         // Not validated against the guild's live role list on purpose: Discord
         // being unreachable must not stop someone fixing the motto, and the
         // @everyone role (whose id is the Discord guild id) never appears in

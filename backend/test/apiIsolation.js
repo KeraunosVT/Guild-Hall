@@ -79,6 +79,14 @@ const section = (t) => console.log('\n' + t);
       ['/api/admin/events/' + idA.events.id, A_MARK],
       ['/api/admin/event-schedule', null],
       ['/api/admin/attendance-stats', null],
+      // The window params: 'all' has to see the fixture events (dated 2099, so
+      // outside every finite window) and a bounded window has to not blow up on
+      // the date arithmetic.
+      ['/api/admin/events?window=all', A_MARK],
+      ['/api/admin/events?window=7', null],
+      ['/api/admin/attendance-stats?window=all', null],
+      ['/api/admin/attendance/late-requests', A_MARK],
+      ['/api/attendance/mine', A_MARK],
       ['/api/admin/rosters', A_MARK],
       ['/api/admin/rosters/' + idA.rosters.id, A_MARK],
       ['/api/admin/currency-awards', A_MARK],
@@ -161,6 +169,14 @@ const section = (t) => console.log('\n' + t);
       ['PATCH', '/api/signups/' + idB.event_signups.id, { mention_role_id: '600000000000000777' }],
       ['POST', '/api/signups/' + idB.event_signups.id + '/close', {}],
       ['DELETE', '/api/signups/' + idB.event_signups.id],
+      // Late attendance. Approving B's request would write an event_attendance
+      // row into B's event — a cross-tenant WRITE reached through nothing but a
+      // uuid, which is the sharpest shape this class of bug takes.
+      ['PATCH', '/api/admin/attendance/late-requests/' + idB.late_attendance_requests.id, { status: 'approved' }],
+      ['DELETE', '/api/attendance/late/' + idB.late_attendance_requests.id],
+      // Filing against another tenant's event: the event id is the only input,
+      // and it must not resolve.
+      ['POST', '/api/attendance/late', { event_id: idB.events.id }],
     ];
 
     // Snapshot every table B owns, so "untouched" is a fact and not a hope.
@@ -169,7 +185,10 @@ const section = (t) => console.log('\n' + t);
       for (const t of ['wargame_matches', 'events', 'rosters', 'player_identities', 'loot_awards',
         'currency_awards', 'lucent_requests', 'event_schedule', 'loot_items', 'loot_categories',
         'loa_entries', 'loot_wishlists', 'shard_counts', 'gear_levels',
-        'event_signups', 'event_signup_entries']) {
+        'event_signups', 'event_signup_entries',
+        // Both halves of late attendance: the request must not be decidable
+        // from another tenant, and no attendance row may appear in B's event.
+        'late_attendance_requests', 'event_attendance']) {
         const { data } = await fx.supabase.from(t).select('*').eq('guild_id', B.id);
         out[t] = JSON.stringify(data);
       }
