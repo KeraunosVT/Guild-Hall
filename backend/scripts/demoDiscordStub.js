@@ -33,6 +33,48 @@ Client.prototype.login = async function demoLogin() {
   return 'demo-token';
 };
 
+// ── Channels ────────────────────────────────────────────────────────────────
+// Channels come from the websocket's cache, not the REST API, so the axios
+// interception above can't reach them and every picker in the app would be
+// empty — the settings page would offer raw snowflakes as its only options, and
+// the Attendance page would report its configured voice channel as one the bot
+// cannot see. Same argument as the member list: correct behaviour, useless demo.
+//
+// Patched onto the gateway's exports rather than faked into discord.js's cache,
+// because hand-building Channel objects is a lot of shape for no extra truth.
+// The guild check is kept rather than stubbed away: these functions are
+// tenant-scoped in the real thing, and a demo that answers for any guild would
+// quietly misrepresent that.
+const gateway = require('../discordGateway');
+const forDemo = (guildHall, rows) => (guildHall && guildHall.discord_guild_id === DEMO_DISCORD_GUILD
+  ? rows.map((r) => ({ ...r }))
+  : []);
+
+// The ids match the ones scripts/demoGuild.js writes into the guild row.
+const VOICE_CHANNELS = [
+  { id: '810000000000000301', name: 'War Room', memberCount: 18 },
+  { id: '810000000000000302', name: 'Overflow', memberCount: 0 },
+  { id: '810000000000000303', name: 'Officers', memberCount: 2 },
+];
+const TEXT_CHANNELS = [
+  { id: '810000000000000201', name: 'roster' },
+  { id: '810000000000000202', name: 'leave-of-absence' },
+  { id: '810000000000000203', name: 'announcements' },
+  { id: '810000000000000204', name: 'signups' },
+  { id: '810000000000000205', name: 'general' },
+];
+
+gateway.listVoiceChannels = (guildHall) => forDemo(guildHall, VOICE_CHANNELS);
+gateway.listTextChannels = (guildHall) => forDemo(guildHall, TEXT_CHANNELS);
+
+// Who Snap finds in the attendance channel: the first eighteen of the fixture,
+// so pressing it produces a believable night rather than the entire guild.
+gateway.getVoiceMembers = (guildHall, channelId) => (
+  guildHall && guildHall.discord_guild_id === DEMO_DISCORD_GUILD && channelId === VOICE_CHANNELS[0].id
+    ? MEMBERS.slice(0, 18).map((m) => ({ id: m.id, name: m.name, avatar: null }))
+    : []
+);
+
 const realGet = axios.get.bind(axios);
 const realPost = axios.post.bind(axios);
 const realPatch = axios.patch.bind(axios);

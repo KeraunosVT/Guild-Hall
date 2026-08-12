@@ -1168,7 +1168,15 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // ── Attendance: voice-channel snapshots ──────────────────────────────────────
   router.get('/voice-channels', (req, res) => {
     if (!gateway) return res.status(503).json({ error: 'Discord gateway not available.' });
-    res.json({ channels: gateway.listVoiceChannels(req.guild) });
+    // The configured channel rides along with the list because the attendance
+    // page has no picker any more — it snaps whatever Guild Settings names, and
+    // only needs the list to put a name to the id. Reading it from /settings
+    // instead would 403 for an officer holding 'attendance' but not 'settings',
+    // which is most of them.
+    res.json({
+      channels: gateway.listVoiceChannels(req.guild),
+      configured_id: (req.guild && req.guild.attendance_voice_channel_id) || null,
+    });
   });
 
   router.get('/voice-channels/:id/members', async (req, res) => {
