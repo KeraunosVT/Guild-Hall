@@ -25,6 +25,11 @@ function trailFor(pathname, house) {
   if (pathname.startsWith('/roster/')) {
     return [{ label: 'Roster', to: '/roster' }, { label: decodeURIComponent(pathname.slice('/roster/'.length)) }];
   }
+  // One logged night. The event's own title is on the page itself, so the crumb
+  // stays generic rather than fetching a name the trail has no way to know.
+  if (pathname.startsWith('/attendance/')) {
+    return [{ label: 'Attendance', to: '/attendance' }, { label: 'Event' }];
+  }
   // Resolver route: redirects to /roster/<name>, but is the active path for
   // an instant before that lands.
   if (pathname === '/me') return [{ label: 'My Profile' }];

@@ -10,6 +10,7 @@ const createLoa = require('./loa');
 const { todayInGuildTz } = createLoa;
 const createAttendance = require('./attendance');
 const createLateAttendance = require('./lateAttendance');
+const createEventDetail = require('./eventDetail');
 const createEventSignups = require('./eventSignups');
 const createGuildSettings = require('./guildSettings');
 const SHARDS = require('../shared/shards.json');
@@ -128,6 +129,12 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   const loa = supabase ? createLoa(supabase, identities) : null;
   const signups = supabase ? createEventSignups(supabase, identities) : null;
   const guildSettings = supabase ? createGuildSettings(supabase) : null;
+  // One assembler for a logged night, shared with the member-facing route in
+  // server.js. The officer flag decides what is redacted, never what is
+  // computed — see the header of eventDetail.js.
+  const eventDetail = supabase
+    ? createEventDetail(supabase, { identities, loa, signups, lateAttendance, listMembers })
+    : null;
 
   router.get('/whoami', (req, res) => {
     res.json({ admin: true, username: req.user.username });
@@ -1236,182 +1243,60 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     });
   });
 
+  // A logged night, in full. The assembly lives in eventDetail.js because the
+  // member-facing route in server.js has to return the same night — see that
+  // module's header for why a second implementation was not an option.
   router.get('/events/:id', async (req, res) => {
+    if (!eventDetail) return res.status(503).json({ error: 'Database not configured.' });
+    try {
+      res.json(await eventDetail.detail(req.guild, req.params.id, { viewerId: req.user.id, officer: true }));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message || 'Failed to load that event.' });
+    }
+  });
+
+  // Add people to a night after the fact, without going through a request.
+  // This is an officer correcting the record they own — the request flow exists
+  // for MEMBERS, who may not write their own attendance, and routing an officer
+  // through an approval queue they are the only approver of is theatre.
+  router.post('/events/:id/attendees', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-    const { data: event, error: eErr } = await dbFor(req)
-      .from('events').select('*').eq('id', req.params.id).single();
-    if (eErr) return res.status(404).json({ error: 'Event not found.' });
-    const { data: attendees, error: aErr } = await dbFor(req)
-      .from('event_attendance').select('*').eq('event_id', req.params.id)
-      .order('display_name');
-    if (aErr) return res.status(500).json({ error: 'Failed to load attendees.' });
+    const ids = [...new Set((Array.isArray(req.body?.discord_ids) ? req.body.discord_ids : [])
+      .map((x) => String(x ?? '').trim()).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ error: 'Nobody selected.' });
 
-    // Who didn't show, split by whether they'd said so. An LOA on file for the
-    // event's date makes an absence excused; anything left is someone who
-    // neither turned up nor filed — the number officers actually want, and the
-    // only place attendance and LOA are compared.
-    //
-    // Best-effort: this needs Discord (for the member roster) and can't be
-    // computed for an undated event, and neither is worth failing the attendee
-    // list over, so absences comes back null and the UI just omits the section.
-    let absences = null;
-    if (event.event_date && loa) {
-      try {
-        const [unavailable, roster, ids] = await Promise.all([
-          loa.unavailableOn(req.guild, { date: event.event_date, eventScheduleId: event.event_schedule_id || null }),
-          listMembers(req.guild),
-          identities.load(req.guildId),
-        ]);
-        const present = new Set((attendees || []).map((a) => String(a.discord_id)));
-        const excusedBy = new Map(unavailable.map((u) => [String(u.discord_id), u]));
-        const missing = roster
-          .filter((m) => !present.has(String(m.id)))
-          .map((m) => ({
-            discord_id: m.id,
-            display_name: ids.displayNameFor(m.id, m.name),
-            loa: excusedBy.get(String(m.id)) || null,
-          }))
-          .sort((a, b) => a.display_name.localeCompare(b.display_name));
-        absences = {
-          excused: missing.filter((m) => m.loa),
-          unexcused: missing.filter((m) => !m.loa),
-        };
-      } catch (err) {
-        console.error('Attendance absence breakdown failed:', err.message);
-      }
-    }
+    const { data: event } = await dbFor(req).from('events').select('id').eq('id', req.params.id).maybeSingle();
+    if (!event) return res.status(404).json({ error: 'Event not found.' });
 
-    // ── Reconciliation against the signup, if one was opened ────────────────
-    // This is the payoff of keeping signups and attendance as two records that
-    // get JOINED rather than one that gets overwritten. Neither is derivable
-    // from the other: "said they'd come" and "was in the channel" are different
-    // facts, and the interesting officer questions live in the gap between them.
-    //
-    //   signedUpNoShow — declared attendance, then didn't turn up. Ranked above
-    //     the generic no-LOA group because it is a stronger signal: someone who
-    //     never answered may simply not have seen the post, where someone who
-    //     clicked "I'm in" made a commitment. Removed from the excused and
-    //     unexcused lists so a member appears in exactly one bucket, but their
-    //     LOA (if they filed one after signing up) travels with them.
-    //   walkIns — turned up without signing up. Not a fault, and never shown as
-    //     one; it's the number that says whether signups are being used at all.
-    let signupSummary = null;
-    if (event.event_date && signups) {
-      try {
-        const view = await signups.forOccasion(req.guild, {
-          date: event.event_date,
-          eventScheduleId: event.event_schedule_id || null,
-        });
-        if (view) {
-          const present = new Set((attendees || []).map((a) => String(a.discord_id)));
-          const declared = new Set(view.going.map((e) => String(e.discord_id)));
-          const noShow = view.going
-            .filter((e) => !present.has(String(e.discord_id)))
-            .map((e) => ({
-              discord_id: e.discord_id,
-              display_name: e.display_name,
-              loa: absences ? (absences.excused.find((m) => String(m.discord_id) === String(e.discord_id))?.loa || null) : null,
-            }));
-          const noShowIds = new Set(noShow.map((m) => String(m.discord_id)));
-          if (absences) {
-            absences.excused = absences.excused.filter((m) => !noShowIds.has(String(m.discord_id)));
-            absences.unexcused = absences.unexcused.filter((m) => !noShowIds.has(String(m.discord_id)));
-          }
-          signupSummary = {
-            id: view.id,
-            title: view.title,
-            capacity: view.capacity,
-            counts: view.counts,
-            composition: view.composition,
-            signedUpNoShow: noShow.sort((a, b) => String(a.display_name).localeCompare(String(b.display_name))),
-            walkIns: (attendees || [])
-              .filter((a) => !declared.has(String(a.discord_id)))
-              .map((a) => a.discord_id),
-          };
-        }
-      } catch (err) {
-        console.error('Attendance signup reconciliation failed:', err.message);
-      }
-    }
+    // Skip anyone already on the list rather than failing the whole batch:
+    // selecting a row that was already attended is a misclick, not an error,
+    // and it must not cost the other nine.
+    const { data: existing } = await dbFor(req).from('event_attendance')
+      .select('discord_id').eq('event_id', event.id).in('discord_id', ids);
+    const have = new Set((existing || []).map((r) => String(r.discord_id)));
+    const toAdd = ids.filter((id) => !have.has(id));
+    if (!toAdd.length) return res.json({ added: 0, skipped: ids.length });
 
-    // ── One row per person, for the table ───────────────────────────────────
-    // Built here rather than in the browser. Everything it needs — who was
-    // present, who was excused, who declared and didn't come — has just been
-    // reconciled above across three sources; handing the frontend those three
-    // lists and asking it to derive the same four-way split is how the page
-    // and the API come to disagree about someone's standing.
-    //
-    // Precedence, highest first:
-    //   attended      — they were in the channel (or a late request was approved)
-    //   noshow_signed — said they were coming and weren't there. Ranked above
-    //                   the LOA bucket because a member who signed up and THEN
-    //                   filed still broke a commitment, and their LOA travels
-    //                   with the row so it can be shown as mitigation.
-    //   loa           — excused, filed in advance
-    //   unexcused     — neither turned up nor said anything
-    const walkIns = new Set((signupSummary && signupSummary.walkIns) || []);
-    const rows = [];
-    (attendees || []).forEach((a) => {
-      rows.push({
-        discord_id: a.discord_id,
-        display_name: a.display_name,
-        status: 'attended',
-        joined_at: a.joined_at,
-        // Where the row came from. Rows written before saas_004 have no
-        // `source`, and those are all snapshots — hence the explicit compare
-        // rather than a truthiness check that would call them late.
-        late: a.source === 'late',
-        walk_in: walkIns.has(String(a.discord_id)),
-        loa: null,
-      });
-    });
-    (signupSummary ? signupSummary.signedUpNoShow : []).forEach((m) => {
-      rows.push({ discord_id: m.discord_id, display_name: m.display_name, status: 'noshow_signed', joined_at: null, late: false, walk_in: false, loa: m.loa || null });
-    });
-    if (absences) {
-      absences.excused.forEach((m) => {
-        rows.push({ discord_id: m.discord_id, display_name: m.display_name, status: 'loa', joined_at: null, late: false, walk_in: false, loa: m.loa });
-      });
-      absences.unexcused.forEach((m) => {
-        rows.push({ discord_id: m.discord_id, display_name: m.display_name, status: 'unexcused', joined_at: null, late: false, walk_in: false, loa: null });
-      });
-    }
-    rows.sort((a, b) => String(a.display_name || '').localeCompare(String(b.display_name || '')));
+    const idMap = await identities.load(req.guildId);
+    const now = new Date().toISOString();
+    const { error } = await dbFor(req).from('event_attendance').insert(toAdd.map((id) => ({
+      id: crypto.randomUUID(), event_id: event.id, discord_id: id,
+      display_name: String(idMap.displayNameFor(id) || '').slice(0, 120) || null,
+      joined_at: now, source: 'late',
+    })));
+    if (error) { console.error('Add attendees error:', error.message); return res.status(500).json({ error: 'Failed to add them.' }); }
+    res.json({ added: toAdd.length, skipped: ids.length - toAdd.length });
+  });
 
-    // ── The party this night ran with ───────────────────────────────────────
-    // Read off the event, never re-fetched from `rosters`: the point of the
-    // frozen copy is that editing or deleting the roster afterwards leaves this
-    // untouched. Each slot is cross-referenced against the attendance rows,
-    // which is the question the stored party exists to answer — not "who was
-    // meant to be in party 3" but "how much of party 3 actually turned up".
-    let party = null;
-    if (event.party_layout) {
-      const present = new Set((attendees || []).map((a) => String(a.discord_id)));
-      const groups = Array.isArray(event.party_layout.parties) ? event.party_layout.parties : [];
-      party = {
-        roster_id: event.roster_id || null,
-        name: event.party_layout.name || null,
-        parties: groups
-          .filter((p) => (p.members || []).length > 0)
-          .map((p) => ({
-            name: p.name || 'Party',
-            members: (p.members || []).map((m) => ({
-              ...m,
-              attended: present.has(String(m.id)),
-            })),
-          })),
-      };
-    }
-
-    // Every request against this event, decided or not — an officer looking at
-    // a night wants to see that they turned someone down, not just that the
-    // queue is empty. Best-effort: this is context, not the record.
-    const lateRequests = lateAttendance
-      ? await lateAttendance.list(req.guild, { status: 'all', eventId: event.id })
-        .catch((err) => { console.error('Attendance late-request lookup failed:', err.message); return []; })
-      : [];
-
-    res.json({ event, attendees: attendees || [], absences, signup: signupSummary, rows, party, late_requests: lateRequests });
+  // Remove one person from a night. The counterpart of the above: a snapshot
+  // catches whoever was sitting in the channel, including someone who joined to
+  // ask a question and left.
+  router.delete('/events/:id/attendees/:discordId', async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
+    const { error } = await dbFor(req).from('event_attendance').delete()
+      .eq('event_id', req.params.id).eq('discord_id', req.params.discordId);
+    if (error) { console.error('Remove attendee error:', error.message); return res.status(500).json({ error: 'Failed to remove them.' }); }
+    res.json({ ok: true });
   });
 
   // ── Signups: read-only feed for the party builder ───────────────────────────

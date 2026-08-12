@@ -87,6 +87,10 @@ const section = (t) => console.log('\n' + t);
       ['/api/admin/attendance-stats?window=all', null],
       ['/api/admin/attendance/late-requests', A_MARK],
       ['/api/attendance/mine', A_MARK],
+      // The member-facing view of a night. Same assembler as the officer route
+      // above, so it is swept too — a redaction bug that widened rather than
+      // narrowed would show up here and nowhere else.
+      ['/api/attendance/events/' + idA.events.id, A_MARK],
       ['/api/admin/rosters', A_MARK],
       ['/api/admin/rosters/' + idA.rosters.id, A_MARK],
       ['/api/admin/currency-awards', A_MARK],
@@ -177,6 +181,13 @@ const section = (t) => console.log('\n' + t);
       // Filing against another tenant's event: the event id is the only input,
       // and it must not resolve.
       ['POST', '/api/attendance/late', { event_id: idB.events.id }],
+      // The member-facing night. It is behind the login wall rather than the
+      // admin gate, so it is the widest door onto another tenant's roster in
+      // the whole feature — every member of every guild can call it.
+      ['GET', '/api/attendance/events/' + idB.events.id],
+      // Writing attendance into another tenant's night, directly.
+      ['POST', '/api/admin/events/' + idB.events.id + '/attendees', { discord_ids: ['700000000000000001'] }],
+      ['DELETE', '/api/admin/events/' + idB.events.id + '/attendees/' + idB.event_attendance.discord_id],
     ];
 
     // Snapshot every table B owns, so "untouched" is a fact and not a hope.

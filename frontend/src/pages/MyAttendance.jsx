@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { CalendarDays, Check, Clock, Loader2, Hourglass, X, ThumbsDown } from 'lucide-react';
 import { fmtDatetime } from '../timeUtils';
@@ -130,7 +131,12 @@ export default function MyAttendance() {
             <div key={ev.id} className="px-5 py-4">
               <div className="flex items-start gap-4 flex-wrap">
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-bone">{ev.title}</div>
+                  {/* Straight through to the full roll for that night — this
+                      list answers "was I counted", the event page answers
+                      "who else was". */}
+                  <Link to={`/attendance/${ev.id}`} className="font-medium text-bone hover:text-brass transition-colors">
+                    {ev.title}
+                  </Link>
                   <div className="flex items-center gap-3 text-xs text-ash mt-1">
                     <span className="inline-flex items-center gap-1">
                       <CalendarDays className="w-3 h-3" />

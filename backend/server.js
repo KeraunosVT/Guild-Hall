@@ -31,6 +31,7 @@ const createIdentities = require('./identities');
 const createLoa = require('./loa');
 const createEventSignups = require('./eventSignups');
 const createLateAttendance = require('./lateAttendance');
+const createEventDetail = require('./eventDetail');
 const createAuditLog = require('./auditLog');
 
 const gearUpload = multer({
@@ -122,6 +123,11 @@ const signups = supabase ? createEventSignups(supabase, identities) : null;
 // Same again: a late request names a member, and it must be the same name the
 // attendance table and the officer queue show.
 const lateAttendance = supabase ? createLateAttendance(supabase, identities) : null;
+// Shared with the officer route in admin.js so both surfaces describe a night
+// identically — see the header of eventDetail.js.
+const eventDetail = supabase
+  ? createEventDetail(supabase, { identities, loa, signups, lateAttendance, listMembers })
+  : null;
 const auditLog = supabase ? createAuditLog(supabase) : null;
 // Guild resolution needs the client to read the tenant registry, so it's built
 // here alongside the other factories rather than imported as a bare middleware.
@@ -925,6 +931,26 @@ app.delete('/api/signups/:id', async (req, res) => {
 // path (unlike POST /api/loa): an officer who wants to add someone can approve
 // a request or re-take attendance, and a member filing "on behalf" of another
 // member is indistinguishable from filing for themselves under a borrowed name.
+// One logged night, for anyone signed in. Same assembler the officer route
+// uses; `officer` decides only what is redacted — the free text on an absence
+// or a late request — never what is computed. A member seeing a different set
+// of facts about a night than an officer does is how two people end up arguing
+// from two different records.
+//
+// Declared before /mine is irrelevant here (different segment), but it IS
+// declared before nothing else claims '/api/attendance/:something'.
+app.get('/api/attendance/events/:id', async (req, res) => {
+  if (!eventDetail) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json(await eventDetail.detail(req.guild, req.params.id, {
+      viewerId: req.user.id,
+      officer: userHas(req.user, 'attendance'),
+    }));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Failed to load that event.' });
+  }
+});
+
 app.get('/api/attendance/mine', async (req, res) => {
   if (!lateAttendance) return res.status(503).json({ error: 'Database not configured.' });
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);

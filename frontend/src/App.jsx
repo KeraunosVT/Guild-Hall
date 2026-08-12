@@ -27,6 +27,7 @@ import PlayerProfile from './pages/PlayerProfile';
 import LOA from './pages/LOA';
 import Signups from './pages/Signups';
 import MyAttendance from './pages/MyAttendance';
+import EventAttendance from './pages/EventAttendance';
 import Classes from './pages/Classes';
 import GearLevel from './pages/GearLevel';
 import GearLevels from './pages/GearLevels';
@@ -129,6 +130,10 @@ function Gate() {
               officer surface is /admin/attendance — a different page, because
               taking attendance and asking about it are different jobs. */}
           <Route path="/attendance" element={<MyAttendance />} />
+          {/* One logged night, in full. Member-visible with officer controls
+              inline — reading the record is not an officer action, and this is
+              where a member notices they are missing from it. */}
+          <Route path="/attendance/:id" element={<EventAttendance />} />
           <Route path="/classes" element={<Classes />} />
           <Route path="/gear" element={<GearLevel />} />
           <Route path="/admin" element={<Admin />} />

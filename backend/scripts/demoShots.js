@@ -37,6 +37,11 @@ const SCALE = 2;
 // tomorrow and the party board would photograph itself empty.
 let SIEGE_DATE = '';
 
+// Same reasoning: the demo's events are created relative to today, so their ids
+// change on every re-seed and a literal here would 404 the moment anyone runs
+// `npm run demo:seed`.
+let EVENT_ID = '';
+
 // `wait` is a selector that must be on screen before the shutter, so a shot is
 // never taken of a half-loaded page — the failure mode that produces a gallery
 // of loading spinners nobody notices until it is live.
@@ -65,22 +70,11 @@ const SHOTS = [
     },
   },
   {
+    // One logged night, which is the page this feature is actually about. The
+    // officer list at /admin/attendance is a directory; this is the record.
     name: 'attendance',
-    path: '/admin/attendance',
-    wait: 'text=Past Events',
-    // Expand a logged night: collapsed, this page is a snap form and a list of
-    // dates, and the thing worth showing is the table underneath — who was
-    // there, who was excused, who signed up and then didn't turn up, and when
-    // each row was recorded.
-    act: async (p) => {
-      await p.locator('button:has-text("Guild Field Boss")').first().click();
-      // Scroll the empty snap form off the top. It is the first thing on the
-      // page and the least interesting thing on it — left in frame, half the
-      // screenshot is a blank form nobody has filled in. Anchored on the
-      // pending-requests heading rather than a pixel count, so the shot doesn't
-      // silently drift the next time the form above it changes height.
-      await p.locator('text=Late attendance').first().scrollIntoViewIfNeeded();
-    },
+    path: () => `/attendance/${EVENT_ID}`,
+    wait: 'text=Sign up date',
   },
   {
     // The member's half of the same feature. Worth its own frame: the officer
@@ -126,6 +120,12 @@ const SHOTS = [
   SIEGE_DATE = feed?.signups?.find((x) => x.capacity)?.event_date || '';
   if (!SIEGE_DATE) console.warn('  note: no capped signup found — the party board will be shot empty.');
 
+  // The most recent logged night — the one with a pending late request and all
+  // four statuses in it, which is what makes the shot worth taking.
+  const logged = await fetch(`${BASE}/api/admin/events?window=7`).then((r) => r.json()).catch(() => null);
+  EVENT_ID = logged?.events?.[0]?.id || '';
+  if (!EVENT_ID) console.warn('  note: no recent event found — the attendance shot will fail.');
+
   // Uses the Edge that ships with Windows rather than downloading a browser —
   // playwright-core is the driver only, which keeps this out of the install
   // path for anyone deploying the app.
@@ -139,7 +139,9 @@ const SHOTS = [
   let taken = 0;
   for (const shot of SHOTS) {
     try {
-      await page.goto(BASE + shot.path, { waitUntil: 'networkidle', timeout: 30_000 });
+      // A function, for paths that need an id looked up from the running demo.
+      const target = typeof shot.path === 'function' ? shot.path() : shot.path;
+      await page.goto(BASE + target, { waitUntil: 'networkidle', timeout: 30_000 });
       if (shot.wait) {
         // Any one of the listed selectors will do — pages differ in what they
         // render when a section is empty, and demanding all of them would fail
@@ -153,7 +155,7 @@ const SHOTS = [
       const file = path.join(OUT, `${shot.name}.png`);
       await page.screenshot({ path: file });
       const kb = Math.round(fs.statSync(file).size / 1024);
-      console.log(`  ${shot.name.padEnd(14)} ${String(kb).padStart(4)} KB  ${shot.path}`);
+      console.log(`  ${shot.name.padEnd(14)} ${String(kb).padStart(4)} KB  ${target}`);
       taken += 1;
     } catch (err) {
       // One bad page must not cost the other seven.

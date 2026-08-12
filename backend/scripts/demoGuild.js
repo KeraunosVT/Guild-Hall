@@ -272,7 +272,14 @@ async function seed() {
   if (!DRY) {
     const siege = events['Guild Siege'];
     const fieldBoss = events['Guild Field Boss'];
-    const lateAdded = MEMBERS[14]; // Nerys — outside the field boss's 14 present
+    // Both requesters must be people the snapshot genuinely missed. A pending
+    // request from someone already on the attendance list resolves to
+    // "attended" and the queue silently shows nothing — which is correct
+    // behaviour and a useless demo.
+    //   field boss present = MEMBERS 1–14, so 19 is absent
+    //   siege present      = MEMBERS 0–20, so 22 is absent
+    const lateAdded = MEMBERS[19];
+    const refused = MEMBERS[22];
     const [lateRow] = await insert('event_attendance', {
       ...g, event_id: siege.id, discord_id: MEMBERS[23].id, display_name: MEMBERS[23].name,
       joined_at: ago(60 * 24 * 7 - 90), source: 'late',
@@ -285,7 +292,7 @@ async function seed() {
       { ...g, event_id: fieldBoss.id, discord_id: lateAdded.id, display_name: lateAdded.name,
         reason: 'Discord dropped my voice state mid-pull.',
         status: 'pending', requested_at: ago(45) },
-      { ...g, event_id: siege.id, discord_id: MEMBERS[20].id, display_name: MEMBERS[20].name,
+      { ...g, event_id: siege.id, discord_id: refused.id, display_name: refused.name,
         reason: 'I think I was there?', status: 'denied', requested_at: ago(60 * 24 * 7 - 20),
         decided_by: MEMBERS[3].name, decided_at: ago(60 * 24 * 7 - 60) },
     ]);

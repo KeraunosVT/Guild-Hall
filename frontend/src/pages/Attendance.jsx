@@ -1,26 +1,24 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../auth';
 import {
-  RefreshCw, Camera, Trash2, ChevronDown, Users, CalendarDays, Loader2, ArrowUp, ArrowDown,
-  BarChart3, Wand2, CalendarCheck, UserPlus, Clock, Swords, Check, X, Inbox,
+  RefreshCw, Camera, Trash2, ChevronRight, Users, CalendarDays, Loader2, ArrowUp, ArrowDown,
+  BarChart3, Wand2, Swords, Check, X, Inbox,
 } from 'lucide-react';
 import { fmtTimeEst, fmtDatetime, guildDayOfWeek, isAfterMidnight } from '../timeUtils';
 import RestrictedGate from '../components/ui/RestrictedGate';
 import Tabs from '../components/ui/Tabs';
-import { Table, Thead, SortableTh, Tr } from '../components/ui/Table';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const LOA_TYPE_LABEL = { event: 'Out this event', range: 'Away (date range)', recurring: 'Out weekly' };
-
-// The four windows the page can be looked at through. Server-side: the list and
-// the rate sidebar have to agree about what "the last two weeks" means, and the
-// only way to guarantee that is for one place to decide it.
+// The four windows this page can be looked at through. Server-side: the event
+// list and the rate sidebar sit next to each other, and the only way to
+// guarantee they agree about what "the last two weeks" means is for one place
+// to decide it.
 //
 // "All" is here so the pre-filter behaviour stays reachable — a filter that
-// hides history with no way back is a filter that loses data as far as anyone
-// using it is concerned.
+// hides history with no way back loses data as far as anyone using it can tell.
 const WINDOWS = [
   { key: '7', label: '1 week' },
   { key: '14', label: '2 weeks' },
@@ -28,167 +26,6 @@ const WINDOWS = [
   { key: 'all', label: 'All' },
 ];
 const WINDOW_LABEL = { 7: 'last 7 days', 14: 'last 14 days', 30: 'last 30 days', all: 'all time' };
-
-// One row per member, one status each. The four are ordered by how much they
-// demand of an officer reading them, not alphabetically.
-const STATUS_META = {
-  attended: { label: 'Attended', className: 'border-emerald-400/40 text-emerald-400' },
-  noshow_signed: { label: "No-show (signed up)", className: 'border-oxblood/60 text-bone bg-oxblooddeep/20' },
-  loa: { label: 'LOA', className: 'border-brass/40 text-brass' },
-  unexcused: { label: 'Unexcused', className: 'border-line text-ash' },
-};
-const STATUS_ORDER = { attended: 0, noshow_signed: 1, loa: 2, unexcused: 3 };
-
-// Tooltip text for an excused absence: the window if the LOA had one, otherwise
-// what kind it was, plus the reason.
-function loaReason(loa) {
-  if (!loa) return undefined;
-  const when = loa.start_time
-    ? (loa.end_time
-      ? `Out ${fmtTimeEst(loa.start_time)} – ${fmtTimeEst(loa.end_time)}`
-      : `Out from ${fmtTimeEst(loa.start_time)} on`)
-    : LOA_TYPE_LABEL[loa.type] || 'On leave of absence';
-  return loa.reason ? `${when} — ${loa.reason}` : when;
-}
-
-function StatusPill({ status }) {
-  const meta = STATUS_META[status] || STATUS_META.unexcused;
-  return (
-    <span className={`inline-flex items-center text-[11px] font-medium border rounded-full px-2.5 py-0.5 whitespace-nowrap ${meta.className}`}>
-      {meta.label}
-    </span>
-  );
-}
-
-// The facts that aren't a status but change how one reads: they came without
-// signing up, or they were added after the fact. Small, next to the name,
-// rather than as statuses of their own — a walk-in attended, full stop.
-function Badge({ children, title, className }) {
-  return (
-    <span title={title} className={`inline-flex items-center gap-1 text-[10px] eyebrow border rounded-full px-1.5 py-0.5 ${className}`}>
-      {children}
-    </span>
-  );
-}
-
-// ── The per-event table ──────────────────────────────────────────────────────
-// Rows arrive already bucketed from GET /api/admin/events/:id. Deriving the
-// four-way split here from the attendees / absences / signup lists would mean
-// two implementations of the same reconciliation, and they would disagree the
-// first time one of them changed.
-function AttendanceTable({ rows }) {
-  // Alphabetical by default, because this is a roll and the question asked of
-  // it most often is "what does it say about X". Sorting by status instead
-  // groups all fourteen who turned up at the top and pushes the handful of
-  // exceptions below the fold, where they are the only rows anyone needed.
-  const [sort, setSort] = useState('name');
-  const [dir, setDir] = useState('asc');
-
-  const sorted = useMemo(() => {
-    const mult = dir === 'asc' ? 1 : -1;
-    return [...rows].sort((a, b) => {
-      if (sort === 'name') return String(a.display_name || '').localeCompare(String(b.display_name || '')) * mult;
-      if (sort === 'time') {
-        // Nobody has a time unless they were there, so absentees sort to the
-        // end either way rather than clustering at whichever end 0 lands on.
-        if (!a.joined_at && !b.joined_at) return 0;
-        if (!a.joined_at) return 1;
-        if (!b.joined_at) return -1;
-        return (new Date(a.joined_at) - new Date(b.joined_at)) * mult;
-      }
-      return ((STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)) * mult
-        || String(a.display_name || '').localeCompare(String(b.display_name || ''));
-    });
-  }, [rows, sort, dir]);
-
-  const onSort = (key) => {
-    if (sort === key) setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSort(key); setDir(key === 'name' || key === 'status' ? 'asc' : 'desc'); }
-  };
-
-  return (
-    <Table maxHeight="max-h-[520px]" minWidth="min-w-[520px]">
-      <Thead sticky>
-        <SortableTh label="Name" sortKey="name" activeKey={sort} dir={dir} onSort={onSort} dense />
-        <SortableTh label="Status" sortKey="status" activeKey={sort} dir={dir} onSort={onSort} dense />
-        <SortableTh label="Attendance taken" sortKey="time" activeKey={sort} dir={dir} onSort={onSort} dense align="right" />
-      </Thead>
-      <tbody>
-        {sorted.map((r) => (
-          <Tr key={`${r.status}:${r.discord_id}`}>
-            <td className="p-2.5">
-              <span className="flex items-center gap-2 flex-wrap">
-                <span className="text-bone">{r.display_name}</span>
-                {r.walk_in && (
-                  <Badge title="Turned up without signing up" className="border-line text-ash">
-                    <UserPlus className="w-2.5 h-2.5" /> Walk-in
-                  </Badge>
-                )}
-                {r.late && (
-                  <Badge title="Added afterwards by an approved late-attendance request" className="border-brass/40 text-brass">
-                    <Clock className="w-2.5 h-2.5" /> Late
-                  </Badge>
-                )}
-                {/* A member who signed up and THEN filed an LOA sits in the
-                    no-show bucket, but the LOA is mitigation and travels with
-                    the row rather than being dropped. */}
-                {r.status === 'noshow_signed' && r.loa && (
-                  <Badge title={loaReason(r.loa)} className="border-brass/40 text-brass">LOA</Badge>
-                )}
-              </span>
-            </td>
-            <td className="p-2.5">
-              <span title={r.status === 'loa' ? loaReason(r.loa) : undefined}>
-                <StatusPill status={r.status} />
-              </span>
-            </td>
-            {/* Absentees have no timestamp, and an em dash says that more
-                honestly than a blank cell or a borrowed event date. */}
-            <td className="p-2.5 text-right whitespace-nowrap text-xs text-ash font-mono">
-              {r.joined_at ? fmtDatetime(r.joined_at) : '—'}
-            </td>
-          </Tr>
-        ))}
-      </tbody>
-    </Table>
-  );
-}
-
-// ── The party the night ran with ─────────────────────────────────────────────
-// A frozen copy stored on the event, not a live read of the saved roster — so
-// this keeps showing what was actually fielded even after the roster is
-// reshuffled for next week. Each name is checked against the attendance rows,
-// which is the question worth asking: not who was meant to be in party 3, but
-// how much of party 3 turned up.
-function PartyBlock({ party }) {
-  const total = party.parties.reduce((n, p) => n + p.members.length, 0);
-  const showed = party.parties.reduce((n, p) => n + p.members.filter((m) => m.attended).length, 0);
-  return (
-    <div>
-      <div className="eyebrow text-[10px] text-brass mb-2 flex items-center gap-2">
-        <Swords className="w-3 h-3" />
-        Party fielded{party.name ? ` — ${party.name}` : ''}
-        <span className="text-ash normal-case tracking-normal">({showed} of {total} turned up)</span>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {party.parties.map((p, i) => (
-          <div key={`${p.name}-${i}`} className="border border-line rounded-lg p-3">
-            <div className="eyebrow text-[10px] text-ash mb-2">{p.name}</div>
-            <ul className="space-y-1">
-              {p.members.map((m) => (
-                <li key={m.id || m.name}
-                  className={`text-sm ${m.attended ? 'text-bone' : 'text-ash line-through decoration-oxblood/60'}`}
-                  title={m.attended ? undefined : 'In the party, not in the attendance record'}>
-                  {m.name}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default function Attendance() {
   const { can } = useAuth();
@@ -209,8 +46,6 @@ export default function Attendance() {
   const [window_, setWindow_] = useState('30');
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
-  const [expanded, setExpanded] = useState(null);
-  const [detail, setDetail] = useState({});
 
   const [stats, setStats] = useState({ totalEvents: 0, members: [] });
   const [loadingStats, setLoadingStats] = useState(true);
@@ -345,40 +180,10 @@ export default function Attendance() {
     try {
       await axios.delete(`/api/admin/events/${id}`);
       setEvents((prev) => prev.filter((e) => e.id !== id));
-      if (expanded === id) { setExpanded(null); setDetail((d) => { const n = { ...d }; delete n[id]; return n; }); }
       flash('Event deleted.');
       loadStats();
     } catch (err) {
       flash(err.response?.data?.error || 'Delete failed.', false);
-    }
-  };
-
-  const loadDetail = async (id) => {
-    const res = await axios.get(`/api/admin/events/${id}`);
-    setDetail((d) => ({
-      ...d,
-      [id]: {
-        // rows is the table; signup survives because the summary line below it
-        // (how many declared, how many of those turned up) has no equivalent in
-        // a per-member view.
-        rows: res.data.rows || [],
-        attendees: res.data.attendees || [],
-        signup: res.data.signup || null,
-        party: res.data.party || null,
-        lateRequests: res.data.late_requests || [],
-      },
-    }));
-  };
-
-  const toggleEvent = async (id) => {
-    if (expanded === id) { setExpanded(null); return; }
-    setExpanded(id);
-    if (detail[id]) return;
-    try {
-      await loadDetail(id);
-    } catch {
-      flash('Could not load attendees.', false);
-      setExpanded(null);
     }
   };
 
@@ -390,13 +195,8 @@ export default function Attendance() {
         ? `${req.display_name} added to ${req.event?.title || 'that event'}.`
         : `Declined ${req.display_name}'s request.`);
       setLateRequests((prev) => prev.filter((r) => r.id !== req.id));
-      // An approval writes an attendance row, so anything already on screen
-      // showing that event is now stale.
-      if (status === 'approved') {
-        loadEvents(); loadStats();
-        if (expanded === req.event_id) await loadDetail(req.event_id).catch(() => {});
-        else setDetail((d) => { const n = { ...d }; delete n[req.event_id]; return n; });
-      }
+      // An approval writes an attendance row, so the counts on screen are stale.
+      if (status === 'approved') { loadEvents(); loadStats(); }
     } catch (err) {
       flash(err.response?.data?.error || 'Could not record that decision.', false);
       // A 409 means someone else decided it — refetch rather than leave a
@@ -615,87 +415,37 @@ export default function Attendance() {
             </div>
           ) : (
             <div className="panel rounded-lg divide-y divide-line">
-              {events.map((ev) => {
-                const isOpen = expanded === ev.id;
-                const info = detail[ev.id];
-                return (
-                  <div key={ev.id}>
-                    <button
-                      onClick={() => toggleEvent(ev.id)}
-                      className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-panelup transition-colors"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-bone truncate">{ev.title}</div>
-                        <div className="flex items-center gap-3 text-xs text-ash mt-1">
-                          <span className="inline-flex items-center gap-1">
-                            <CalendarDays className="w-3 h-3" />
-                            {ev.event_date ? new Date(ev.event_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <Users className="w-3 h-3" /> {ev.attendees}
-                          </span>
-                          {ev.has_party && (
-                            <span className="inline-flex items-center gap-1 text-brass/70" title="A party was recorded for this night">
-                              <Swords className="w-3 h-3" />
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteEvent(ev.id); }}
-                        className="text-ash hover:text-oxblood shrink-0 p-1" title="Delete event"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      <ChevronDown className={`w-4 h-4 text-ash shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    {isOpen && (
-                      <div className="px-5 pb-5 space-y-4">
-                        {!info ? (
-                          <div className="py-4 text-center text-ash"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading…</div>
-                        ) : info.rows.length === 0 ? (
-                          <div className="py-4 text-center text-ash">No attendance recorded.</div>
-                        ) : (
-                          <>
-                            <AttendanceTable rows={info.rows} />
-
-                            {info.signup && (
-                              <div className="flex items-center gap-2 text-xs text-ash">
-                                <CalendarCheck className="w-3.5 h-3.5 text-brass" />
-                                <span>
-                                  {info.signup.counts.going} signed up{info.signup.capacity ? ` of ${info.signup.capacity}` : ''}
-                                  {' · '}{info.attendees.length - (info.signup.walkIns?.length || 0)} of them turned up
-                                  {info.signup.walkIns?.length > 0 && ` · ${info.signup.walkIns.length} walk-in${info.signup.walkIns.length === 1 ? '' : 's'}`}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Decided requests, so an officer can see that
-                                someone was turned down rather than only that
-                                the queue is empty. */}
-                            {info.lateRequests.filter((r) => r.status !== 'pending').length > 0 && (
-                              <div className="text-xs text-ash space-y-0.5">
-                                {info.lateRequests.filter((r) => r.status !== 'pending').map((r) => (
-                                  <div key={r.id}>
-                                    <span className={r.status === 'approved' ? 'text-emerald-400' : 'text-oxblood'}>
-                                      {r.status === 'approved' ? 'Approved' : 'Denied'}
-                                    </span>
-                                    {' '}late attendance for <span className="text-bone">{r.display_name}</span>
-                                    {r.decided_by && ` — ${r.decided_by}`}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {info.party && <PartyBlock party={info.party} />}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {events.map((ev) => (
+                <div key={ev.id} className="flex items-center gap-4 px-5 py-4 hover:bg-panelup transition-colors">
+                  {/* Straight to the night's own page. This used to expand in
+                      place; a logged night is a page's worth of table, party
+                      and detail, and it was never going to fit under a row. */}
+                  <Link to={`/attendance/${ev.id}`} className="min-w-0 flex-1">
+                    <div className="font-medium text-bone truncate hover:text-brass transition-colors">{ev.title}</div>
+                    <div className="flex items-center gap-3 text-xs text-ash mt-1">
+                      <span className="inline-flex items-center gap-1">
+                        <CalendarDays className="w-3 h-3" />
+                        {ev.event_date ? new Date(ev.event_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Users className="w-3 h-3" /> {ev.attendees}
+                      </span>
+                      {ev.has_party && (
+                        <span className="inline-flex items-center gap-1 text-brass/70" title="A party was recorded for this night">
+                          <Swords className="w-3 h-3" />
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                  <button
+                    onClick={() => deleteEvent(ev.id)}
+                    className="text-ash hover:text-oxblood shrink-0 p-1" title="Delete event"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <ChevronRight className="w-4 h-4 text-ash shrink-0" />
+                </div>
+              ))}
             </div>
           )}
         </div>
