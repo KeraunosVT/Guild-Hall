@@ -33,11 +33,24 @@ const { guildTimeOn } = require('./eliteTimers');
 const { listMembers } = require('./discord');
 const createLoa = require('./loa');
 
-const { guildDayOfWeek, isAfterMidnight } = createLoa;
+const { guildDayOfWeek, isAfterMidnight, todayInGuildTz } = createLoa;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const SNOWFLAKE = /^\d{17,20}$/;
+
+// What an auto-opened occurrence records as its creator, in created_by and in
+// the audit line. A name rather than a blank, because "who opened this?" is
+// asked most often about the one nobody remembers opening.
+const AUTO_ACTOR = 'Recurring schedule';
+
+// Calendar arithmetic on a YYYY-MM-DD string, done in UTC so a server in any
+// timezone lands on the same day. The result is a guild-NIGHT date, which is a
+// label rather than an instant — turning it into one is startsAtFor's job.
+const addDays = (date, n) => {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+};
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -410,6 +423,110 @@ module.exports = function createEventSignups(supabase, identities = null) {
       return this.detail(guild, id, { officer: false });
     },
 
+    // ── RECURRENCE ──────────────────────────────────────────────────────────
+
+    // Open whatever occurrences of one recurring event are now due, and return
+    // the ones THIS call created so the caller can announce them.
+    //
+    // Every line here is shaped by the fact that it runs every few minutes, in
+    // every process, forever. It has to open each night exactly once, must not
+    // re-open a night an officer deliberately deleted, and must be safe to run
+    // twice at the same instant. The claim ledger buys all three — the
+    // reasoning is in the header of migrations/saas_005_recurring_signups.sql.
+    //
+    // The date arithmetic stays in JavaScript rather than moving into SQL
+    // because the guild-night rollover already lives in loa.js: a 12:30am event
+    // belongs to the previous night, and re-deriving that rule in a second
+    // language is how the sweep and the LOA board would come to disagree about
+    // which night Saturday is.
+    async autoOpen(guild, schedule) {
+      const db = dbFor(guild);
+      const time = schedule.event_time;
+      // Both conditions are already enforced by a check constraint and by the
+      // settings route. Checked again because this one runs unattended, and
+      // create() throwing inside a sweep is a log line nobody reads.
+      if (!schedule.signup_auto_open || !TIME_RE.test(time || '')) return [];
+
+      const daysAhead = Math.min(30, Math.max(1, parseInt(schedule.signup_open_days_ahead, 10) || 7));
+      const nightDow = guildDayOfWeek(schedule.day_of_week, time, guild);
+      const today = todayInGuildTz(guild);
+
+      // Every night this recurrence falls on between today and the horizon.
+      // Usually one; two when the horizon is wider than the gap between
+      // occurrences, which is a legitimate setting rather than a special case.
+      const candidates = [];
+      for (let i = 0; i <= daysAhead; i++) {
+        const date = addDays(today, i);
+        // Deliberately the same expression create() validates with. A date this
+        // agrees on and create() then rejects would claim the night and open
+        // nothing, which is the one failure mode with no visible symptom.
+        if (new Date(`${date}T12:00:00`).getDay() !== nightDow) continue;
+        const startsAt = startsAtFor(guild, date, time);
+        // Tonight's raid, an hour after it started, is not something to open
+        // signups for. A process that was down all day comes back and catches
+        // up on the future only.
+        if (!startsAt || startsAt.getTime() <= Date.now()) continue;
+        candidates.push(date);
+      }
+      if (!candidates.length) return [];
+
+      const { data: claimed, error } = await db.from('signup_auto_opens')
+        .select('event_date').eq('event_schedule_id', schedule.id).in('event_date', candidates);
+      if (error) {
+        console.error('signups.autoOpen ledger read failed:', error.message);
+        return [];
+      }
+      const done = new Set((claimed || []).map((r) => r.event_date));
+
+      const opened = [];
+      for (const date of candidates) {
+        if (done.has(date)) continue;
+
+        // Claim first, create second. The other order lets two sweeps both
+        // decide the night is unopened before either has written anything.
+        const { error: claimErr } = await db.from('signup_auto_opens')
+          .insert({ event_schedule_id: schedule.id, event_date: date });
+        if (claimErr) {
+          // 23505 is another process winning the race — the mechanism working,
+          // not a fault, and it happens on every pass in a two-instance deploy.
+          if (claimErr.code !== '23505') console.error('signups.autoOpen claim failed:', claimErr.message);
+          continue;
+        }
+
+        try {
+          const signup = await this.create(guild, {
+            eventScheduleId: schedule.id,
+            eventDate: date,
+            startTime: time,
+            title: schedule.name,
+            capacity: schedule.signup_capacity,
+            reminderLeadMinutes: schedule.signup_reminder_lead_minutes,
+            // Explicitly null, never undefined: undefined means "apply the
+            // guild default", and a recurrence that pings nobody has to stay
+            // expressible for a guild that has one set (saas_003's rule, one
+            // level up).
+            mentionRoleId: schedule.signup_mention_role_id || null,
+            createdBy: AUTO_ACTOR,
+          });
+          await db.from('signup_auto_opens').update({ signup_id: signup.id })
+            .eq('event_schedule_id', schedule.id).eq('event_date', date);
+          opened.push(signup);
+        } catch (err) {
+          // 409: an officer already opened this night by hand. The claim STAYS
+          // — there is nothing left to do for that night, and releasing it
+          // would have this retry every five minutes until the event passed.
+          if (err.status === 409) continue;
+          // Anything else is transient. Release the claim so the next pass
+          // tries again; holding it would drop the night permanently and
+          // silently, which is the exact failure this feature exists to stop.
+          await db.from('signup_auto_opens').delete()
+            .eq('event_schedule_id', schedule.id).eq('event_date', date);
+          console.error(`signups.autoOpen failed for "${schedule.name}" on ${date}:`, err.message);
+        }
+      }
+      return opened;
+    },
+
     // Declare attendance. `addedBy` is set only when an officer is acting on
     // someone's behalf, which is also what the entry stores — so the list can
     // later say "added by an officer" rather than implying the member clicked.
@@ -606,8 +723,37 @@ async function closeFinished(supabase) {
   return data || [];
 }
 
+// Every recurrence, in every guild, that has asked to open its own signups.
+//
+// Unscoped on purpose, and allow-listed in test/leakAudit.js for it: a schedule
+// row is a guild's own recurrence rule and carries its own guild_id, and every
+// write it leads to goes back through tenantDb scoped by THAT id (see autoOpen
+// above, and the guildFor() resolution in discordGateway's sweep). One query
+// for every tenant beats one query per tenant on a loop that runs forever.
+//
+// This one is a plain select rather than an UPDATE … RETURNING like its two
+// neighbours, because the claim it leads to cannot be expressed in SQL — which
+// night is due depends on the guild's timezone and its night-rollover hour. The
+// atomic step happens one level down, on signup_auto_opens' primary key.
+async function autoOpenSchedules(supabase) {
+  const { data, error } = await supabase.from('event_schedule')
+    .select('*').eq('signup_auto_open', true);
+  if (error) {
+    // The migration hasn't been run yet. Idle rather than noisy: the rest of
+    // the sweep is unaffected and still has reminders to send.
+    if (/signup_auto_open|schema cache/i.test(error.message)) {
+      console.warn('Recurring signups idle — run migrations/saas_005_recurring_signups.sql in Supabase.');
+      return [];
+    }
+    console.error('recurring signup scan failed:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
 module.exports.claimDueReminders = claimDueReminders;
 module.exports.closeFinished = closeFinished;
+module.exports.autoOpenSchedules = autoOpenSchedules;
 module.exports.composeCounts = composeCounts;
 module.exports.roleOf = roleOf;
 module.exports.ROLES = ROLES;

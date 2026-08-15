@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import {
   CalendarCheck, Check, X, Users, Clock, Send, Trash2, Bell, Plus, Settings,
   ChevronDown, AlertTriangle, Loader2, Shield, Swords, Heart, HelpCircle, AtSign,
+  Repeat,
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { PageShell } from '../components/ui/PageShell';
@@ -167,6 +168,25 @@ export default function Signups() {
   const [pingRoles, setPingRoles] = useState([]);
   const [newMention, setNewMention] = useState('');
 
+  // Officer: which recurring events open their own signups. These settings live
+  // on the event schedule rather than on any one occurrence — a weekly raid has
+  // one capacity and one reminder lead, and the place to change them is the
+  // place that describes the raid.
+  //
+  // Gated on 'schedule', not 'attendance', because that is what
+  // /api/admin/event-schedule requires. Showing the panel to an officer whose
+  // save would 403 is worse than not showing it at all.
+  const canSchedule = can('schedule');
+  const [showRecurring, setShowRecurring] = useState(false);
+  const [recurring, setRecurring] = useState([]);
+  const [savingId, setSavingId] = useState(null);
+
+  const loadRecurring = useCallback(() => {
+    axios.get('/api/admin/event-schedule')
+      .then((res) => setRecurring(res.data.schedule || []))
+      .catch(() => setRecurring([]));
+  }, []);
+
   const load = () => {
     setLoading(true); setError('');
     axios.get('/api/signups')
@@ -179,6 +199,7 @@ export default function Signups() {
   useEffect(() => {
     axios.get('/api/event-schedule').then((res) => setSchedule(res.data.schedule || [])).catch(() => {});
   }, []);
+  useEffect(() => { if (canSchedule) loadRecurring(); }, [canSchedule, loadRecurring]);
   useEffect(() => {
     if (!officer) return;
     axios.get('/api/admin/members').then((res) => setMembers(res.data.members || [])).catch(() => {});
@@ -265,6 +286,29 @@ export default function Signups() {
     act(s.id, () => axios.delete(`/api/signups/${s.id}`), 'Signup deleted.');
   };
 
+  // One PUT per row carrying every field at once, so flipping the switch on
+  // applies whatever the officer typed beside it. Saving a bare toggle and
+  // discarding the numbers next to it is the shape that makes people distrust a
+  // settings panel.
+  const saveRecurring = async (row, values) => {
+    setSavingId(row.id);
+    try {
+      await axios.put(`/api/admin/event-schedule/${row.id}`, values);
+      flash(values.signup_auto_open
+        ? `Saved — "${row.name}" opens its own signups.`
+        : `Saved — "${row.name}" no longer opens signups on its own.`);
+      loadRecurring();
+      // Turning one on can open tonight's occurrence within a few minutes, so
+      // the list below is refreshed too rather than waiting for a page reload
+      // to explain where a new signup came from.
+      load();
+    } catch (err) {
+      flash(err.response?.data?.error || 'Could not save that.', false);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const pickEvent = (id) => {
     setNewEventId(id);
     const ev = schedule.find((s) => s.id === id);
@@ -311,16 +355,47 @@ export default function Signups() {
           Say you're coming. Not signing up isn't the same as saying no —{' '}
           <a href="/loa" className="text-brass hover:text-brassbright">file an LOA</a> if you can't make it.
         </p>
-        {officer && (
-          <button onClick={() => setShowOpen((v) => !v)}
-            className="inline-flex items-center gap-2 text-sm text-brass hover:text-brassbright transition-colors shrink-0">
-            <Settings className="w-4 h-4" /> {showOpen ? 'Close' : 'Open signups'}
-          </button>
-        )}
+        <div className="flex items-center gap-5 shrink-0">
+          {canSchedule && (
+            <button onClick={() => setShowRecurring((v) => !v)}
+              className="inline-flex items-center gap-2 text-sm text-brass hover:text-brassbright transition-colors">
+              <Repeat className="w-4 h-4" /> {showRecurring ? 'Close' : 'Recurring'}
+            </button>
+          )}
+          {officer && (
+            <button onClick={() => setShowOpen((v) => !v)}
+              className="inline-flex items-center gap-2 text-sm text-brass hover:text-brassbright transition-colors">
+              <Settings className="w-4 h-4" /> {showOpen ? 'Close' : 'Open signups'}
+            </button>
+          )}
+        </div>
       </div>
 
       <Toast msg={msg} />
       {error && <div className="mb-6 px-5 py-3 rounded-lg border border-oxblood/50 bg-oxblooddeep/20 text-bone text-sm">{error}</div>}
+
+      {canSchedule && showRecurring && (
+        <div className="mb-8 panel rounded-lg overflow-hidden">
+          <div className="px-5 py-4 border-b border-line">
+            <div className="eyebrow text-brass text-[10px] mb-1.5">Signups that open themselves</div>
+            <p className="text-xs text-ash max-w-2xl">
+              A scheduled event with this on opens its own signups ahead of every occurrence and
+              posts them to Discord — nobody has to remember. Deleting one that has opened is final:
+              it won't come back, so a cancelled night stays cancelled.
+            </p>
+          </div>
+          {recurring.length === 0 ? (
+            <div className="px-5 py-6 text-sm text-ash">
+              No recurring events yet — add them to the event schedule on the{' '}
+              <a href="/loa" className="text-brass hover:text-brassbright">LOA page</a>.
+            </div>
+          ) : recurring.map((row) => (
+            <RecurringRow key={row.id} row={row} pingRoles={pingRoles}
+              saving={savingId === row.id}
+              onSave={(values) => saveRecurring(row, values)} />
+          ))}
+        </div>
+      )}
 
       {officer && showOpen && (
         <div className="mb-8 panel rounded-lg p-6">
@@ -414,6 +489,110 @@ export default function Signups() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+// One recurring event's automatic-signup settings.
+//
+// The switch and the fields save together in a single write. They are all one
+// decision — "open this raid weekly, twenty slots, ping the raiders" — and a
+// panel that saved the switch while dropping the numbers typed beside it is the
+// kind that people stop trusting after the first time.
+const INPUT = 'bg-hall border border-line rounded-lg px-3 py-1.5 text-sm text-bone focus:outline-none focus:border-brass';
+
+function RecurringRow({ row, pingRoles, saving, onSave }) {
+  const [days, setDays] = useState(row.signup_open_days_ahead ?? 7);
+  const [capacity, setCapacity] = useState(row.signup_capacity ?? '');
+  const [reminder, setReminder] = useState(row.signup_reminder_lead_minutes ?? '');
+  const [mention, setMention] = useState(row.signup_mention_role_id || '');
+
+  // Re-sync from the server after a save, so the drafts can't quietly diverge
+  // from what was actually stored (a rejected value being the case that
+  // matters).
+  useEffect(() => { setDays(row.signup_open_days_ahead ?? 7); }, [row.signup_open_days_ahead]);
+  useEffect(() => { setCapacity(row.signup_capacity ?? ''); }, [row.signup_capacity]);
+  useEffect(() => { setReminder(row.signup_reminder_lead_minutes ?? ''); }, [row.signup_reminder_lead_minutes]);
+  useEffect(() => { setMention(row.signup_mention_role_id || ''); }, [row.signup_mention_role_id]);
+
+  const on = !!row.signup_auto_open;
+  const values = (auto) => ({
+    signup_auto_open: auto,
+    signup_open_days_ahead: Number(days) || 7,
+    signup_capacity: capacity === '' ? null : Number(capacity),
+    signup_reminder_lead_minutes: reminder === '' ? null : Number(reminder),
+    signup_mention_role_id: mention || null,
+  });
+
+  return (
+    <div className="px-5 py-4 border-b border-line last:border-0">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="min-w-[160px] flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-bone truncate">{row.name}</span>
+            {on && (
+              <span className="eyebrow text-[10px] text-emerald-400 border border-emerald-400/40 rounded-full px-2 py-0.5">
+                Automatic
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-ash mt-1">
+            {DAYS[row.day_of_week]}s{row.event_time ? ` · ${fmtTimeEst(row.event_time)}` : ''}
+            {isAfterMidnight(row.event_time) && <span className="text-brass"> · after midnight</span>}
+          </div>
+        </div>
+
+        {/* An event with no time has no instant to measure a reminder or an
+            auto-close against, so the switch is not offered at all rather than
+            offered and then refused by the server. */}
+        {!row.event_time ? (
+          <div className="text-xs text-brass max-w-sm">
+            Give this event a start time in the event schedule before it can open its own signups.
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="eyebrow text-[10px] text-ash block mb-1.5">Opens</label>
+              <div className="flex items-center gap-2">
+                <input type="number" min="1" max="30" value={days}
+                  onChange={(e) => setDays(e.target.value)} className={`w-16 ${INPUT}`} />
+                <span className="text-xs text-ash">days ahead</span>
+              </div>
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] text-ash block mb-1.5">Capacity</label>
+              <input type="number" min="1" value={capacity} placeholder="No cap"
+                onChange={(e) => setCapacity(e.target.value)} className={`w-24 ${INPUT}`} />
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] text-ash block mb-1.5">Remind (min before)</label>
+              <input type="number" min="1" value={reminder} placeholder="Off"
+                onChange={(e) => setReminder(e.target.value)} className={`w-24 ${INPUT}`} />
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] text-ash mb-1.5 flex items-center gap-1.5">
+                <AtSign className="w-3 h-3" /> Ping on post
+              </label>
+              <PingPicker roles={pingRoles} value={mention} onChange={setMention}
+                disabled={saving} className={INPUT} />
+            </div>
+            <div className="flex-1" />
+            <div className="flex items-center gap-2">
+              {on && (
+                <Button variant="secondary" size="none" className="px-3 py-1.5 text-xs"
+                  disabled={saving} onClick={() => onSave(values(true))}>Save</Button>
+              )}
+              <Button variant={on ? 'destructive' : 'primary'} size="none" className="px-3 py-1.5 text-xs"
+                disabled={saving} onClick={() => onSave(values(!on))}
+                title={on
+                  ? 'Occurrences already opened stay open'
+                  : 'Opens the next occurrence within the next few minutes'}>
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (on ? 'Turn off' : 'Turn on')}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

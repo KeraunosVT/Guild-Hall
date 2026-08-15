@@ -492,7 +492,12 @@ app.put('/api/loot/:discordId', async (req, res) => {
 // Event schedule (read-only for members; admin manages via admin router).
 app.get('/api/event-schedule', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-  const { data, error } = await dbFor(req).from('event_schedule').select('*').order('day_of_week').order('name');
+  // An explicit projection, not the row: when the guild meets is public to the
+  // guild, but the recurring-signup settings hanging off the same row (capacity,
+  // which role gets pinged) are officer business and reach the browser only
+  // through /api/admin/event-schedule.
+  const { data, error } = await dbFor(req).from('event_schedule')
+    .select('id, name, day_of_week, event_time').order('day_of_week').order('name');
   if (error) return res.status(500).json({ error: 'Failed to load schedule.' });
   res.json({ schedule: data || [] });
 });

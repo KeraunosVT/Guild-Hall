@@ -1462,6 +1462,55 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   });
 
   // ── Event schedule management ────────────────────────────────────────────────
+
+  // The whole row, signup settings included. Members get the narrower public
+  // projection from /api/event-schedule — a recurrence is public knowledge, but
+  // which role it pings and how many slots it holds is officer business.
+  router.get('/event-schedule', async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
+    const { data, error } = await dbFor(req).from('event_schedule')
+      .select('*').order('day_of_week').order('name');
+    if (error) return res.status(500).json({ error: 'Failed to load the schedule.' });
+    res.json({ schedule: data || [] });
+  });
+
+  // Reads the recurring-signup settings off a request body into `update`,
+  // returning a message when one of them is nonsense and null when they're
+  // fine. Only keys actually PRESENT are touched, so the LOA page's schedule
+  // editor — which knows nothing about signups — keeps sending name/day/time
+  // alone without silently clearing them.
+  //
+  // Validated here rather than trusted from the form because these columns are
+  // read by an unattended sweep: a bad value doesn't surface as an error on
+  // somebody's screen, it surfaces as a raid call that never gets posted.
+  const applySignupSettings = (body, update) => {
+    if ('signup_auto_open' in body) {
+      update.signup_auto_open = body.signup_auto_open === true || body.signup_auto_open === 'true';
+    }
+    if ('signup_open_days_ahead' in body) {
+      const n = parseInt(body.signup_open_days_ahead, 10);
+      if (!Number.isFinite(n) || n < 1 || n > 30) return 'Signups can open between 1 and 30 days ahead.';
+      update.signup_open_days_ahead = n;
+    }
+    for (const [key, label] of [
+      ['signup_capacity', 'Capacity'],
+      ['signup_reminder_lead_minutes', 'Reminder lead time'],
+    ]) {
+      if (!(key in body)) continue;
+      const v = body[key];
+      if (v === null || v === '') { update[key] = null; continue; }
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n) || n <= 0) return `${label} must be a positive number, or blank.`;
+      update[key] = n;
+    }
+    if ('signup_mention_role_id' in body) {
+      const id = String(body.signup_mention_role_id ?? '').trim();
+      if (id && !/^\d{17,20}$/.test(id)) return `Not a Discord role id — ${id}`;
+      update.signup_mention_role_id = id || null;
+    }
+    return null;
+  };
+
   router.post('/event-schedule', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
     const { name, day_of_week, event_time } = req.body || {};
@@ -1471,6 +1520,11 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     const id = crypto.randomUUID();
     const row = { id, name: String(name).slice(0, 120), day_of_week: dow };
     if (event_time) row.event_time = String(event_time).slice(0, 5);
+    const bad = applySignupSettings(req.body || {}, row);
+    if (bad) return res.status(400).json({ error: bad });
+    if (row.signup_auto_open && !row.event_time) {
+      return res.status(400).json({ error: 'An event needs a start time before it can open its own signups.' });
+    }
     const { error } = await dbFor(req).from('event_schedule').insert(row);
     if (error) return res.status(500).json({ error: 'Failed to create event.' });
     res.json({ id });
@@ -1478,7 +1532,8 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
   router.put('/event-schedule/:id', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
-    const { name, day_of_week, event_time } = req.body || {};
+    const body = req.body || {};
+    const { name, day_of_week, event_time } = body;
     const update = {};
     if (name !== undefined) update.name = String(name).slice(0, 120);
     if (day_of_week !== undefined) {
@@ -1487,6 +1542,28 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       update.day_of_week = dow;
     }
     if (event_time !== undefined) update.event_time = event_time ? String(event_time).slice(0, 5) : null;
+    const bad = applySignupSettings(body, update);
+    if (bad) return res.status(400).json({ error: bad });
+
+    // Auto-open and a start time are a pair — the occurrence's starts_at is what
+    // both the reminder and the auto-close are measured against. The database
+    // enforces it too, but only one of these two writes has the other half of
+    // the pair in front of it, so the row is read when either half moves. The
+    // constraint would otherwise refuse this as an opaque 500, most often to an
+    // officer on the LOA page who was only clearing a time and has no idea this
+    // feature exists.
+    if (update.signup_auto_open === true || 'event_time' in update) {
+      const { data: existing } = await dbFor(req).from('event_schedule')
+        .select('event_time, signup_auto_open').eq('id', req.params.id).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Event not found.' });
+      const merged = { ...existing, ...update };
+      if (merged.signup_auto_open && !merged.event_time) {
+        return res.status(400).json({
+          error: 'This event opens its own signups, so it needs a start time. Set a time, or turn automatic signups off first.',
+        });
+      }
+    }
+
     const { error } = await dbFor(req).from('event_schedule').update(update).eq('id', req.params.id);
     if (error) return res.status(500).json({ error: 'Failed to update event.' });
     res.json({ ok: true });

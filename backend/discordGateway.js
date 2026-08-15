@@ -1209,11 +1209,26 @@ async function sendSignupReminders(guildHall, signup, recipients) {
 const SIGNUP_SWEEP_MS = 60 * 1000;
 let signupSweepTimer = null;
 
+// Recurring signups get their own, slower loop. Nothing about it is urgent —
+// it opens a raid call a week out — and it costs a query per auto-opening
+// recurrence, so running it with the reminder sweep would be sixty times the
+// work for no earlier a post.
+//
+// It runs once immediately as well. A deploy at 8pm on Friday should not mean
+// Saturday's signup waits on a timer that has only just started; the pass is
+// idempotent, so an extra one is free.
+const AUTO_OPEN_SWEEP_MS = 5 * 60 * 1000;
+let autoOpenTimer = null;
+
 function startSignupSweep() {
   if (signupSweepTimer || !db) return;
   signupSweepTimer = setInterval(() => {
     runSignupSweep().catch((err) => console.error('Signup sweep error:', err.message));
   }, SIGNUP_SWEEP_MS);
+  autoOpenTimer = setInterval(() => {
+    runAutoOpenSweep().catch((err) => console.error('Recurring signup sweep error:', err.message));
+  }, AUTO_OPEN_SWEEP_MS);
+  runAutoOpenSweep().catch((err) => console.error('Recurring signup sweep error:', err.message));
 }
 
 // Resolve a row's OWN guild. The sweep is cross-tenant by nature — one process
@@ -1245,6 +1260,46 @@ async function runSignupSweep() {
     const guildHall = await guildFor(row.guild_id);
     if (!guildHall) continue;
     editSignupMessage(guildHall, row.id).catch((err) => console.error('Signup close edit failed:', err.message));
+  }
+}
+
+// Open the signups a recurring event is due for, and announce them.
+//
+// The whole point of the feature is that nobody is watching, so nothing here
+// may throw: one guild whose schedule is misconfigured, or whose signup channel
+// the bot was kicked out of, must not stop every other guild's raid call from
+// opening. Each guild is therefore its own try, and the post is best-effort on
+// top of a signup that is already saved.
+//
+// Cross-tenant like the sweep above, and with the same rule: a schedule row's
+// own guild_id is the only correct scope, resolved through the registry so a
+// suspended or deregistered guild simply stops opening signups.
+async function runAutoOpenSweep() {
+  if (!ready || !signups || !db) return;
+
+  for (const schedule of await createEventSignups.autoOpenSchedules(db)) {
+    const guildHall = await guildFor(schedule.guild_id);
+    if (!guildHall) continue;
+    let opened = [];
+    try {
+      opened = await signups.autoOpen(guildHall, schedule);
+    } catch (err) {
+      console.error(`Recurring signup failed for "${schedule.name}":`, err.message);
+      continue;
+    }
+    for (const view of opened) {
+      console.log(`Recurring signup opened: "${view.title}" on ${view.event_date} (${guildHall.tag}).`);
+      // Posting is separate from opening on purpose. The signup exists on the
+      // website either way; a Discord outage costs the announcement, not the
+      // night — and the officer's Repost button is the fix, exactly as it is
+      // for one opened by hand.
+      try {
+        const posted = await postSignupMessage(guildHall, view);
+        if (posted) await signups.setMessage(guildHall, view.id, posted.channelId, posted.messageId);
+      } catch (err) {
+        console.error('Recurring signup post failed:', err.message);
+      }
+    }
   }
 }
 

@@ -46,8 +46,11 @@ const uid = (n) => `9${String(n).padStart(11, '0')}`;
 
   const { data: stale } = await s.from('guilds').select('id').eq('discord_guild_id', FIXTURE);
   for (const g of stale || []) {
+    await s.from('signup_auto_opens').delete().eq('guild_id', g.id);
     await s.from('event_signup_entries').delete().eq('guild_id', g.id);
     await s.from('event_signups').delete().eq('guild_id', g.id);
+    await s.from('event_schedule').delete().eq('guild_id', g.id);
+    await s.from('audit_log').delete().eq('guild_id', g.id);
     await s.from('guilds').delete().eq('id', g.id);
   }
   const { data: G, error: gErr } = await s.from('guilds').insert({
@@ -207,9 +210,140 @@ const uid = (n) => `9${String(n).padStart(11, '0')}`;
   try { await opened(G, { mentionRoleId: 'not-a-snowflake' }); } catch (e) { rejected = e.status; }
   check('a malformed role id is refused rather than stored', rejected === 400, String(rejected));
 
+  // ── 11 ───────────────────────────────────────────────────────────────────
+  // Recurring signups. Everything below is about a loop that runs unattended
+  // forever, where every failure is silent in the same direction: a night that
+  // never opens is a night nobody signs up for, and the guild finds out at
+  // raid time. The three properties are "opens each night exactly once",
+  // "stays inside the horizon", and "does not resurrect what an officer
+  // deleted" — and only the first has a visible symptom when it breaks.
+  const { todayInGuildTz } = require('../loa');
+  const addDays = (date, n) => {
+    const [y, m, d] = date.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+  };
+  // The same expression eventSignups uses to read a date's day of week, so the
+  // test and the code agree about which day a string names.
+  const dowOf = (date) => new Date(`${date}T12:00:00`).getDay();
+
+  const today = todayInGuildTz(G);
+  const mkSchedule = async (name, dow, time, extra = {}) => {
+    const { data, error } = await s.from('event_schedule').insert({
+      guild_id: G.id, name, day_of_week: dow, event_time: time,
+      signup_auto_open: true, signup_open_days_ahead: 7, ...extra,
+    }).select('*').single();
+    if (error) {
+      // Exits rather than failing every assertion below it: without the columns
+      // there is nothing here to be right or wrong about, and one clear line
+      // beats sixteen failures that all mean the same thing. The fixture guild
+      // left behind is cleaned up by the next run — that is what its fixed id
+      // is for.
+      console.error(`\n  fixture schedule failed: ${error.message}`);
+      if (/signup_auto_open|schema cache|column/i.test(error.message)) {
+        console.error('  run migrations/saas_005_recurring_signups.sql in this database first.');
+      }
+      process.exit(1);
+    }
+    return data;
+  };
+  const signupsFor = async (scheduleId) => (await s.from('event_signups')
+    .select('*').eq('event_schedule_id', scheduleId).order('event_date')).data || [];
+  const ledgerFor = async (scheduleId) => (await s.from('signup_auto_opens')
+    .select('*').eq('event_schedule_id', scheduleId)).data || [];
+
+  section('11. a recurrence opens its next night, once');
+  const night = addDays(today, 3);
+  const weekly = await mkSchedule('Weekly probe', dowOf(night), '21:00', {
+    signup_capacity: 24, signup_reminder_lead_minutes: 90,
+  });
+  const firstPass = await mod.autoOpen(G, weekly);
+  check('opens exactly one occurrence', firstPass.length === 1, `${firstPass.length} opened`);
+  check('for the night it recurs on', firstPass[0] && firstPass[0].event_date === night,
+    firstPass[0] ? firstPass[0].event_date : '(none)');
+  check('carrying the schedule name, capacity and reminder',
+    firstPass[0] && firstPass[0].title === 'Weekly probe'
+    && firstPass[0].capacity === 24 && firstPass[0].reminder_lead_minutes === 90);
+
+  // The whole feature is a loop. A second pass that opens a second copy would
+  // split one night's attendee list across two posts.
+  const secondPass = await mod.autoOpen(G, weekly);
+  check('a second pass opens nothing', secondPass.length === 0, `${secondPass.length} opened`);
+  check('and there is still one occurrence', (await signupsFor(weekly.id)).length === 1);
+
+  // ── 12 ───────────────────────────────────────────────────────────────────
+  // The one thing the unique index alone could not give: it only holds while
+  // the row exists, so without the ledger a cancelled night would silently
+  // reappear within five minutes, forever.
+  section('12. a deleted occurrence is not resurrected');
+  await s.from('event_signups').delete().eq('id', firstPass[0].id);
+  const afterDelete = await mod.autoOpen(G, weekly);
+  check('deleting it and sweeping again opens nothing', afterDelete.length === 0, `${afterDelete.length} opened`);
+  check('none exist', (await signupsFor(weekly.id)).length === 0);
+  const ledger = await ledgerFor(weekly.id);
+  check('the claim outlives the signup it opened', ledger.length === 1, `${ledger.length} ledger rows`);
+  check('and remembers the signup is gone', ledger[0] && ledger[0].signup_id === null);
+
+  // ── 13 ───────────────────────────────────────────────────────────────────
+  // A horizon that doesn't hold is a signup posted a month early, which people
+  // answer and then forget by the time it happens.
+  section('13. the horizon is respected');
+  const far = addDays(today, 5);
+  const narrow = await mkSchedule('Narrow probe', dowOf(far), '21:00', { signup_open_days_ahead: 3 });
+  check('a night beyond the horizon is left alone', (await mod.autoOpen(G, narrow)).length === 0);
+  const widened = { ...narrow, signup_open_days_ahead: 7 };
+  const nowInRange = await mod.autoOpen(G, widened);
+  check('widening the horizon opens it', nowInRange.length === 1 && nowInRange[0].event_date === far,
+    nowInRange[0] ? nowInRange[0].event_date : '(none)');
+
+  // ── 14 ───────────────────────────────────────────────────────────────────
+  // The guild night, not the calendar day. day_start is 01:00 for this fixture,
+  // so a 00:30 event is stored under Sunday and belongs to SATURDAY night —
+  // and getting this wrong opens the signup on the wrong day of the week, one
+  // day late, every week.
+  section('14. an after-midnight event opens on the night it belongs to');
+  const lateNight = addDays(today, 4);
+  const owl = await mkSchedule('Owl probe', (dowOf(lateNight) + 1) % 7, '00:30');
+  const owlOpened = await mod.autoOpen(G, owl);
+  check('the occurrence is dated the night, not the calendar day',
+    owlOpened.length === 1 && owlOpened[0].event_date === lateNight,
+    owlOpened[0] ? owlOpened[0].event_date : '(none)');
+  check('but it starts after midnight, on the next day',
+    owlOpened[0] && owlOpened[0].starts_at.startsWith(`${addDays(lateNight, 1)}T00:30`),
+    owlOpened[0] ? owlOpened[0].starts_at : '');
+
+  // ── 15 ───────────────────────────────────────────────────────────────────
+  // Two web processes both run this loop. They contend on the ledger's primary
+  // key, which is the only thing between them and two posts for one night.
+  section('15. two sweeps at the same instant');
+  const raceNight = addDays(today, 6);
+  const raced = await mkSchedule('Race probe', dowOf(raceNight), '20:00');
+  const both = await Promise.all([mod.autoOpen(G, raced), mod.autoOpen(G, raced)]);
+  check('between them they open exactly one', both[0].length + both[1].length === 1,
+    `${both[0].length} + ${both[1].length}`);
+  check('and one occurrence exists', (await signupsFor(raced.id)).length === 1);
+
+  // ── 16 ───────────────────────────────────────────────────────────────────
+  // An officer who opened tonight by hand has already done the thing. The
+  // sweep must neither duplicate it nor keep retrying it every five minutes
+  // until the event has passed.
+  section('16. a night already opened by hand is left alone');
+  const handNight = addDays(today, 2);
+  const handled = await mkSchedule('Hand probe', dowOf(handNight), '19:00');
+  await mod.create(G, {
+    eventScheduleId: handled.id, eventDate: handNight, startTime: '19:00',
+    title: 'Opened by an officer', createdBy: 'test',
+  });
+  const swept = await mod.autoOpen(G, handled);
+  check('the sweep opens nothing', swept.length === 0, `${swept.length} opened`);
+  check("the officer's occurrence is untouched",
+    (await signupsFor(handled.id)).map((x) => x.title).join() === 'Opened by an officer');
+  check('the night is claimed, so it stops trying', (await ledgerFor(handled.id)).length === 1);
+
+  await s.from('signup_auto_opens').delete().eq('guild_id', G.id);
   await s.from('audit_log').delete().eq('guild_id', G.id);
   await s.from('event_signup_entries').delete().eq('guild_id', G.id);
   await s.from('event_signups').delete().eq('guild_id', G.id);
+  await s.from('event_schedule').delete().eq('guild_id', G.id);
   await s.from('guilds').delete().eq('id', G.id);
 
   console.log(`\n${pass} passed, ${fail} failed`);

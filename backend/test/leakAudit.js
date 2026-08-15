@@ -26,6 +26,7 @@ const { GLOBAL_TABLES } = require('../tenantDb');
 const ALLOWED_UNSCOPED = [
   { file: 'guildRegistry.js', table: 'guilds', why: 'the tenant registry itself; scoped by id, not guild_id' },
   { file: 'guildSettings.js', table: 'guilds', why: 'a tenant editing its OWN registry row; scoped by .eq(id, req.guild.id), not guild_id' },
+  { file: 'eventSignups.js', table: 'event_schedule', why: "the recurring-signup sweep's cross-tenant candidate scan; each row carries its own guild_id and every write it leads to is re-scoped through tenantDb by that id" },
   { file: 'questlogImport.js', table: 'questlog_items', why: 'global game reference data, shared by every guild' },
   { file: 'admin.js', table: 'questlog_items', why: 'global game reference data, shared by every guild' },
   { file: 'admin.js', table: 'market_potentials', why: 'auction-house prices, identical for every guild' },
