@@ -28,6 +28,7 @@ import LOA from './pages/LOA';
 import Signups from './pages/Signups';
 import MyAttendance from './pages/MyAttendance';
 import EventAttendance from './pages/EventAttendance';
+import EventCalendar from './pages/EventCalendar';
 import Classes from './pages/Classes';
 import GearLevel from './pages/GearLevel';
 import GearLevels from './pages/GearLevels';
@@ -130,6 +131,10 @@ function Gate() {
               officer surface is /admin/attendance — a different page, because
               taking attendance and asking about it are different jobs. */}
           <Route path="/attendance" element={<MyAttendance />} />
+          {/* The week ahead. Declared before /attendance/:id for readability —
+              React Router ranks a static segment above a dynamic one either
+              way, so "calendar" is never read as an event id. */}
+          <Route path="/attendance/calendar" element={<EventCalendar />} />
           {/* One logged night, in full. Member-visible with officer controls
               inline — reading the record is not an officer action, and this is
               where a member notices they are missing from it. */}

@@ -820,6 +820,44 @@ app.post('/api/signups', async (req, res) => {
   }
 });
 
+// Member: sign up for something on the schedule that nobody has opened yet.
+//
+// The Event Calendar lists every recurring event on the nights it falls on, so
+// a member can reach a night with no occurrence row behind it. This opens one
+// (quietly — see openForSchedule for why there is no post and no ping) and puts
+// them in it, in that order and in one request: a client that had to
+// create-then-join would leave an empty occurrence behind whenever the second
+// call failed, and an empty occurrence is indistinguishable from a raid call
+// nobody answered.
+//
+// The target is ALWAYS the caller. There is deliberately no on-behalf form:
+// an officer adding somebody else has the full open-and-add flow on the Signups
+// page, and a member-facing route that reads a discord_id out of the body is
+// one missing permission check away from anyone signing up anyone.
+app.post('/api/signups/for-event', async (req, res) => {
+  if (!signups) return res.status(503).json({ error: 'Database not configured.' });
+  const { event_schedule_id, event_date } = req.body || {};
+  try {
+    const occurrence = await signups.openForSchedule(req.guild, {
+      eventScheduleId: event_schedule_id || null,
+      eventDate: event_date,
+      openedBy: req.user.username || req.user.id,
+    });
+    const result = await signups.join(req.guild, occurrence.id, {
+      discordId: req.user.id,
+      displayName: req.user.username,
+    });
+    res.json({ ...result, signup_id: occurrence.id, opened: occurrence.opened });
+    // A refresh, never a first post. If this call opened the occurrence there
+    // is no message to edit and this is a no-op; if an officer had already
+    // opened and announced the night, its embed would otherwise keep showing
+    // the old count until somebody clicked a button in Discord.
+    gateway.refreshSignupMessage(req.guild, occurrence.id);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 // Post (or re-post) the announcement and remember where it landed. Re-posting
 // is the fix for a message an officer deleted by hand: the buttons key off the
 // occurrence id alone, so a fresh message is fully functional immediately.

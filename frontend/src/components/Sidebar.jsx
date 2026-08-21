@@ -3,7 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
-  Terminal, Heart, CalendarCheck,
+  Terminal, Heart, CalendarCheck, CalendarRange,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -19,13 +19,18 @@ export const guildLinks = [
 export const memberLinks = [
   { to: '/shards', label: 'Shards', icon: Gem },
   { to: '/loot', label: 'Loot', icon: Package },
-  // Signups, LOA and Attendance sit together on purpose: they are the three
-  // halves of "will you be there / were you there" from a member's side, and
-  // someone looking for one often wants another. Attendance last, because it
-  // is the only one that looks backwards.
+  // These four sit together on purpose: they are the whole of "will you be
+  // there / were you there" from a member's side, and someone looking for one
+  // often wants another. Ordered by how far ahead they look — the week's
+  // calendar, then the individual signup, then the absence — with Attendance
+  // last, because it is the only one that looks backwards.
+  { to: '/attendance/calendar', label: 'Event Calendar', icon: CalendarRange },
   { to: '/signups', label: 'Signups', icon: CalendarCheck },
   { to: '/loa', label: 'LOA', icon: CalendarOff },
-  { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
+  // `end` because /attendance now has pages beneath it: without it the NavLink
+  // prefix-matches /attendance/calendar and two sibling items light up at once,
+  // which reads as a bug rather than as a parent.
+  { to: '/attendance', label: 'Attendance', end: true, icon: ClipboardCheck },
   { to: '/classes', label: 'Classes', icon: Layers },
   { to: '/gear', label: 'Gear Level', icon: Gauge },
 ];

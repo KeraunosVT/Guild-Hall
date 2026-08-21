@@ -339,6 +339,80 @@ const uid = (n) => `9${String(n).padStart(11, '0')}`;
     (await signupsFor(handled.id)).map((x) => x.title).join() === 'Opened by an officer');
   check('the night is claimed, so it stops trying', (await ledgerFor(handled.id)).length === 1);
 
+  // ── 17 ───────────────────────────────────────────────────────────────────
+  // A member signing up for something on the schedule that nobody has opened
+  // yet (the Event Calendar's "I'm in"). The property that matters is the same
+  // one section 15 tests for the sweep, for the same reason: two members
+  // tapping one night must end up in ONE attendee list, or half the guild is
+  // signed up to a night the other half can't see.
+  section('17. a member opens the night by signing up for it');
+  const memberNight = addDays(today, 4);
+  const onDemand = await mkSchedule('On-demand probe', dowOf(memberNight), '21:00', {
+    // Auto-open OFF: this is the case the calendar exists for — a recurrence
+    // nobody has asked the sweep to open, which was previously unanswerable.
+    signup_auto_open: false, signup_capacity: 12,
+  });
+
+  const first = await mod.openForSchedule(G, {
+    eventScheduleId: onDemand.id, eventDate: memberNight, openedBy: 'Probe One',
+  });
+  check('it opens the occurrence', first.opened === true);
+  const born = (await signupsFor(onDemand.id))[0];
+  check('dated the night it recurs on', born && born.event_date === memberNight,
+    born ? born.event_date : '(none)');
+  check("carrying the recurrence's own capacity", born && born.capacity === 12);
+  // The two that make it quiet. A member's tap must not ping a role, and must
+  // not leave an announcement nobody asked for.
+  check('with no ping role', born && born.mention_role_id === null);
+  check('and no Discord message', born && born.message_id === null);
+
+  const second = await mod.openForSchedule(G, {
+    eventScheduleId: onDemand.id, eventDate: memberNight, openedBy: 'Probe Two',
+  });
+  check('a second member joins the same occurrence',
+    second.opened === false && second.id === first.id);
+  check('and there is still exactly one', (await signupsFor(onDemand.id)).length === 1);
+
+  // Both reads return "already open" before either insert lands, so the unique
+  // index is the only thing keeping this to one row.
+  const raceNight2 = addDays(today, 5);
+  const raced2 = await mkSchedule('On-demand race', dowOf(raceNight2), '20:00', { signup_auto_open: false });
+  const pair = await Promise.all([
+    mod.openForSchedule(G, { eventScheduleId: raced2.id, eventDate: raceNight2, openedBy: 'A' }),
+    mod.openForSchedule(G, { eventScheduleId: raced2.id, eventDate: raceNight2, openedBy: 'B' }),
+  ]);
+  check('two at the same instant open one occurrence',
+    (await signupsFor(raced2.id)).length === 1);
+  check('and both are told about the same one', pair[0].id === pair[1].id);
+
+  // The guild night again, from the other direction: the member is looking at
+  // SATURDAY and tapping the 00:30 event that is stored under Sunday.
+  const owlNight = addDays(today, 6);
+  const owl2 = await mkSchedule('On-demand owl', (dowOf(owlNight) + 1) % 7, '00:30', { signup_auto_open: false });
+  await mod.openForSchedule(G, { eventScheduleId: owl2.id, eventDate: owlNight, openedBy: 'Probe' });
+  const owlRow = (await signupsFor(owl2.id))[0];
+  check('an after-midnight event opens under the night, not the calendar day',
+    owlRow && owlRow.event_date === owlNight, owlRow ? owlRow.event_date : '(none)');
+  check('and still starts on the following calendar day',
+    owlRow && owlRow.starts_at.startsWith(`${addDays(owlNight, 1)}T00:30`),
+    owlRow ? owlRow.starts_at : '');
+
+  // The refusals. Each one is a night a member must not be able to conjure:
+  // one the event doesn't fall on, one that has already run, and one so far out
+  // that the list would be forgotten by the time it happened.
+  const refused = async (label, args) => {
+    try { await mod.openForSchedule(G, args); check(label, false, 'no error thrown'); }
+    catch (err) { check(label, err.status === 400 || err.status === 409, `${err.status}: ${err.message}`); }
+  };
+  await refused('a night the event does not fall on is refused',
+    { eventScheduleId: onDemand.id, eventDate: addDays(memberNight, 1), openedBy: 'Probe' });
+  await refused('a night that has already started is refused',
+    { eventScheduleId: onDemand.id, eventDate: addDays(memberNight, -7), openedBy: 'Probe' });
+  await refused('a night beyond the 30-day ceiling is refused',
+    { eventScheduleId: onDemand.id, eventDate: addDays(memberNight, 35), openedBy: 'Probe' });
+  check('nothing extra was created by the refusals',
+    (await signupsFor(onDemand.id)).length === 1);
+
   await s.from('signup_auto_opens').delete().eq('guild_id', G.id);
   await s.from('audit_log').delete().eq('guild_id', G.id);
   await s.from('event_signup_entries').delete().eq('guild_id', G.id);

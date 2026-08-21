@@ -44,6 +44,14 @@ const SNOWFLAKE = /^\d{17,20}$/;
 // asked most often about the one nobody remembers opening.
 const AUTO_ACTOR = 'Recurring schedule';
 
+// How far ahead a MEMBER may bring an occurrence into existence by signing up
+// for it (openForSchedule). Deliberately the same ceiling the recurring sweep
+// is capped at — signup_open_days_ahead is constrained to 1..30 in
+// saas_005_recurring_signups.sql — because it answers the same question: how
+// far out is a list still the list people remember answering? Officers have no
+// such limit; they are opening a night on purpose.
+const MEMBER_OPEN_HORIZON_DAYS = 30;
+
 // Calendar arithmetic on a YYYY-MM-DD string, done in UTC so a server in any
 // timezone lands on the same day. The result is a guild-NIGHT date, which is a
 // label rather than an instant — turning it into one is startsAtFor's job.
@@ -149,6 +157,20 @@ module.exports = function createEventSignups(supabase, identities = null) {
       console.warn('signups: identity lookup failed, using the supplied name:', err.message);
       return fallback;
     }
+  }
+
+  // The occurrence for one (recurring event, night) pair, or null. Keyed on the
+  // same two columns as the partial unique index in saas_002, so "is this night
+  // already open?" is answered by the thing that enforces it rather than by a
+  // second rule that could disagree with it.
+  async function findOccurrence(db, eventScheduleId, eventDate) {
+    const { data, error } = await db.from('event_signups')
+      .select('id').eq('event_schedule_id', eventScheduleId).eq('event_date', eventDate).maybeSingle();
+    if (error) {
+      console.error('signups.findOccurrence error:', error.message);
+      throw httpError(500, 'Failed to load signups.');
+    }
+    return data || null;
   }
 
   // discord_id -> 'Tank' | 'DPS' | 'Healer', for whoever has one on file.
@@ -421,6 +443,95 @@ module.exports = function createEventSignups(supabase, identities = null) {
       }
       await audit(guild, { id: createdBy, name: createdBy }, `signup opened: ${cleanTitle}`, { id, event_date: eventDate, capacity: cap });
       return this.detail(guild, id, { officer: false });
+    },
+
+    // Bring the occurrence a member is trying to sign up for into existence, if
+    // nobody has opened it yet. Returns the occurrence id either way.
+    //
+    // ── WHY THIS EXISTS ─────────────────────────────────────────────────────
+    // The Event Calendar lists every recurring event on the nights it falls on,
+    // including the nights nobody has opened signups for. Without this, most of
+    // that list is unanswerable: a member looks at Saturday's field boss, wants
+    // to say they're coming, and the only honest thing the page can tell them
+    // is "wait for an officer". The schedule already says the night is
+    // happening — that is what a schedule IS — so signing up for it needs no
+    // second act of permission.
+    //
+    // ── WHY IT IS QUIET ─────────────────────────────────────────────────────
+    // No Discord post, and mentionRoleId is forced to null regardless of what
+    // the recurrence's ping role says. One member tapping a row three weeks out
+    // is answering a question, not calling a raid, and forty phones buzzing
+    // because of it is how a guild learns to mute the bot. The occurrence shows
+    // up on the Signups page like any other, and an officer's Repost button is
+    // the one click that announces it.
+    //
+    // That leaves it in exactly the position of an occurrence an officer opened
+    // with post:false — which is also why the auto-open sweep will now skip
+    // that night (autoOpen's 23505 branch treats any already-open night as
+    // done; see test 16 in test/signupSemantics.js). The trade is deliberate:
+    // an unannounced night somebody is already signed up for beats a night
+    // nobody could answer at all.
+    //
+    // ── WHY IT IS IDEMPOTENT ────────────────────────────────────────────────
+    // Two members tapping the same night at the same instant must end up in one
+    // attendee list, not two occurrences with half of it each. The read below
+    // catches the ordinary case and the unique index catches the race; both
+    // return the occurrence that won rather than an error, because from the
+    // caller's side "it already exists" is success.
+    async openForSchedule(guild, { eventScheduleId, eventDate, openedBy }) {
+      const db = dbFor(guild);
+      if (!eventScheduleId) throw httpError(400, 'Pick an event.');
+      if (!DATE_RE.test(eventDate || '')) throw httpError(400, 'Date must be in YYYY-MM-DD format.');
+
+      const existing = await findOccurrence(db, eventScheduleId, eventDate);
+      if (existing) return { id: existing.id, opened: false };
+
+      const { data: scheduled } = await db.from('event_schedule').select('*').eq('id', eventScheduleId).maybeSingle();
+      if (!scheduled) throw httpError(400, 'Unknown event.');
+      if (!TIME_RE.test(scheduled.event_time || '')) {
+        throw httpError(400, `"${scheduled.name}" has no start time on the schedule, so signups can't be opened for it.`);
+      }
+      // The night it belongs to, not the calendar day it is stored on — the
+      // same check create() makes, done here too so the errors below are about
+      // the right occurrence.
+      const dow = new Date(`${eventDate}T12:00:00`).getDay();
+      if (guildDayOfWeek(scheduled.day_of_week, scheduled.event_time, guild) !== dow) {
+        throw httpError(400, "That event isn't scheduled on that date.");
+      }
+
+      const startsAt = startsAtFor(guild, eventDate, scheduled.event_time);
+      if (!startsAt) throw httpError(400, 'Could not resolve that date and time.');
+      // A night that has already begun is attendance's business, not signups'.
+      if (startsAt.getTime() <= Date.now()) throw httpError(409, 'That event has already started.');
+      if (startsAt.getTime() - Date.now() > MEMBER_OPEN_HORIZON_DAYS * 86_400_000) {
+        throw httpError(400, `Signups can only be opened up to ${MEMBER_OPEN_HORIZON_DAYS} days ahead.`);
+      }
+
+      try {
+        const signup = await this.create(guild, {
+          eventScheduleId,
+          eventDate,
+          startTime: scheduled.event_time,
+          title: scheduled.name,
+          // The recurrence's own settings, so a night opened this way is the
+          // same night the sweep would have opened — minus the announcement.
+          capacity: scheduled.signup_capacity,
+          reminderLeadMinutes: scheduled.signup_reminder_lead_minutes,
+          // Explicitly null, never undefined: undefined means "apply the guild
+          // default ping", which is the one thing this path must never do.
+          mentionRoleId: null,
+          createdBy: openedBy || null,
+        });
+        return { id: signup.id, opened: true };
+      } catch (err) {
+        // Somebody won the race between the read above and this insert. Their
+        // occurrence is as good as the one this call would have made.
+        if (err.status === 409) {
+          const won = await findOccurrence(db, eventScheduleId, eventDate);
+          if (won) return { id: won.id, opened: false };
+        }
+        throw err;
+      }
     },
 
     // ── RECURRENCE ──────────────────────────────────────────────────────────
@@ -757,3 +868,4 @@ module.exports.autoOpenSchedules = autoOpenSchedules;
 module.exports.composeCounts = composeCounts;
 module.exports.roleOf = roleOf;
 module.exports.ROLES = ROLES;
+module.exports.MEMBER_OPEN_HORIZON_DAYS = MEMBER_OPEN_HORIZON_DAYS;
