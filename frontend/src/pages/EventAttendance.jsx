@@ -164,9 +164,34 @@ export default function EventAttendance() {
     return next;
   });
 
+  // The No Reply table is the path once the 24-hour request window has closed.
+  // A member past it can no longer file anything, and the people who need adding
+  // after the fact are almost always the ones who never replied at all — so they
+  // are selectable too, and the same bulk bar applies.
+  //
+  // ONE selection set across both tables, deliberately: two sets would mean
+  // "Mark 6 attended" adding six from one table and quietly none from the other.
+  // Ids can't collide because a member appears in exactly one of the two.
+  const noReplyRows = useMemo(() => (data && data.no_reply) || [], [data]);
+  const selectableRows = useMemo(
+    () => [...rows, ...noReplyRows.map((r) => ({ ...r, status: 'no_reply' }))],
+    [rows, noReplyRows],
+  );
+
+  // No pagination on No Reply — every row is on screen, so selecting all of them
+  // selects only what the officer can actually see, which is the same rule the
+  // main table's page-scoped header checkbox exists to keep.
+  const allNoReply = noReplyRows.length > 0 && noReplyRows.every((r) => selected.has(r.discord_id));
+  const toggleAllNoReply = () => setSelected((prev) => {
+    const next = new Set(prev);
+    if (allNoReply) noReplyRows.forEach((r) => next.delete(r.discord_id));
+    else noReplyRows.forEach((r) => next.add(r.discord_id));
+    return next;
+  });
+
   const selectedRows = useMemo(
-    () => rows.filter((r) => selected.has(r.discord_id)),
-    [rows, selected],
+    () => selectableRows.filter((r) => selected.has(r.discord_id)),
+    [selectableRows, selected],
   );
   const pendingSelected = selectedRows.filter((r) => r.request_id);
   const absentSelected = selectedRows.filter((r) => r.status !== 'attended');
@@ -214,7 +239,9 @@ export default function EventAttendance() {
     );
   }
 
-  const { event, no_reply: noReply, party, viewer, counts, signup } = data;
+  // no_reply comes off `data` as noReplyRows above, where the selection helpers
+  // need it — one name for it, not two.
+  const { event, party, viewer, counts, signup } = data;
   const dateText = event.event_date
     ? new Date(`${event.event_date}T12:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : 'No date';
@@ -292,9 +319,17 @@ export default function EventAttendance() {
           {/* ── Officer bulk bar ─────────────────────────────────────
               Appears only with a selection, and only offers actions that
               apply to what is actually selected — a greyed-out "Approve"
-              beside four attended members is noise. */}
+              beside four attended members is noise.
+
+              Floated at the foot of the viewport rather than sitting in the
+              flow, because No Reply is below a hundred rows of roll: ticking a
+              name down there and having the only button scrolled off-screen
+              reads as nothing happening. Pinned to the bottom and not the top
+              specifically so it covers page margin instead of a row of the
+              record — an action bar that hides a member is worse than one you
+              have to scroll to. */}
           {officer && selected.size > 0 && (
-            <div className="mb-4 panel rounded-lg px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 panel border border-line rounded-lg px-4 py-3 flex items-center gap-3 flex-wrap shadow-xl shadow-hall/60">
               <span className="text-sm text-ash">{selected.size} selected</span>
               {pendingSelected.length > 0 && (
                 <>
@@ -385,7 +420,9 @@ export default function EventAttendance() {
 
           {/* ── Table footer ─────────────────────────────────────────── */}
           <div className="flex items-center justify-between gap-4 flex-wrap mt-3 text-xs text-ash">
-            <span>{officer ? `${selected.size} of ${rows.length} row(s) selected.` : `${rows.length} member${rows.length === 1 ? '' : 's'}`}</span>
+            {/* Counted against both tables, because the selection spans both —
+                "3 of 40" while the bulk bar says 5 is worse than no count. */}
+            <span>{officer ? `${selected.size} of ${selectableRows.length} row(s) selected.` : `${rows.length} member${rows.length === 1 ? '' : 's'}`}</span>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2">
                 Rows per page
@@ -412,16 +449,31 @@ export default function EventAttendance() {
           {/* Its own table, because it is its own question. These people did
               not decline — nothing was heard from them at all, which is as
               often a problem with the post as with the member. */}
-          {noReply.length > 0 && (
+          {noReplyRows.length > 0 && (
             <div className="mt-12">
               <h2 className="font-display text-xl text-bone tracking-[0.06em]">
-                No Reply <span className="text-sm font-sans text-ash">— {noReply.length}</span>
+                No Reply <span className="text-sm font-sans text-ash">— {noReplyRows.length}</span>
               </h2>
               <div className="rule-fade mt-2 mb-4" />
+              {/* Officers only, and stated plainly: this is the answer to the
+                  "ask an officer directly" that a member hits once their 24
+                  hours are up. Adding from here has no deadline. */}
+              {officer && (
+                <p className="text-xs text-ash -mt-2 mb-4">
+                  Someone turned up but never signed up? Tick them and use <span className="text-bone">Mark attended</span>.
+                  There is no time limit on this — it is how a night gets corrected once the 24-hour request window has closed.
+                </p>
+              )}
               <div className="panel rounded-lg overflow-auto">
                 <table className="w-full text-sm min-w-[600px]">
                   <thead className="border-b border-line">
                     <tr className="eyebrow text-[10px] text-ash whitespace-nowrap">
+                      {officer && (
+                        <th className="p-3 w-10">
+                          <input type="checkbox" checked={allNoReply} onChange={toggleAllNoReply}
+                            title="Select everyone who never replied" className="accent-brass cursor-pointer" />
+                        </th>
+                      )}
                       <th className="p-3 font-normal text-left w-12">#</th>
                       <th className="p-3 font-normal text-left">Username</th>
                       <th className="p-3 font-normal text-left">Role</th>
@@ -429,8 +481,15 @@ export default function EventAttendance() {
                     </tr>
                   </thead>
                   <tbody>
-                    {noReply.map((r, i) => (
-                      <tr key={r.discord_id} className="border-b border-line/60 hover:bg-panelup transition-colors">
+                    {noReplyRows.map((r, i) => (
+                      <tr key={r.discord_id}
+                        className={`border-b border-line/60 hover:bg-panelup transition-colors ${selected.has(r.discord_id) ? 'bg-panelup' : ''}`}>
+                        {officer && (
+                          <td className="p-3">
+                            <input type="checkbox" checked={selected.has(r.discord_id)}
+                              onChange={() => toggleRow(r.discord_id)} className="accent-brass cursor-pointer" />
+                          </td>
+                        )}
                         <td className="p-3 text-ash tabular-nums">{i + 1}</td>
                         <td className="p-3">
                           <span className="flex items-center gap-2">
@@ -447,6 +506,11 @@ export default function EventAttendance() {
               </div>
             </div>
           )}
+
+          {/* Room to scroll the last row out from under the floating bar. Only
+              while there is a bar — an unexplained gap at the foot of every
+              page is its own small wrongness. */}
+          {officer && selected.size > 0 && <div className="h-24" aria-hidden="true" />}
         </>
       )}
 
