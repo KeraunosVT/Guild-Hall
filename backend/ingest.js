@@ -55,19 +55,17 @@ WEAPON POSITION RULES:
 - Weapons appear as TWO small icons side by side HORIZONTALLY in the second column.
 - LEFT icon = weapon1, RIGHT icon = weapon2. Do NOT read them as stacked or vertical.
 
-CRITICAL WEAPON IDENTIFICATION RULES:
-- Greatsword: a tall single straight blade with a wide crossguard and NO shield. This is the most common weapon — when you see a single sword shape, it is almost always Greatsword.
-- SnS: ALWAYS has a visible shield (round or rectangular) with a sword behind or beside it. If there is NO shield present, it is NOT SnS.
+CRITICAL WEAPON IDENTIFICATION & VERIFICATION RULES:
+- SnS: Look EXTREMELY closely at the background behind the sword. If there is a vertical shield outline, crest, or border framing the blade, it is SnS. Do not mistake the shield edge for a wide crossguard.
+- Greatsword: Purely a standalone blade and crossguard with NO surrounding shield frame or background plate. Do not default to SnS when uncertain, but verify the presence of a shield backdrop first.
+- Wand: The Wand icon is uniquely identifiable by its solid dark rectangular book/tome container with a thin rod running through it. Look for the dark blocky book shape. If the icon has a dark rectangular backdrop, it is ALWAYS a Wand. Do not confuse it with Longbows, Crossbows, or swords.
+- Gauntlet: A bulky, metallic armored fist, clenched glove, or hand-shaped icon. Look for rounded knuckle plates or a thick gauntlet shape that is entirely distinct from thin blades, staves, or books.
 - Dagger: two short blades crossed in an X shape.
-- Longbow: two diagonal lines forming a narrow arc shape (the bow + string side by side).
+- Longbow: two diagonal lines forming a narrow arc shape (the bow + string side by side). Transparent background, unlike the Wand's dark rectangular book block.
 - Spear: a single long pole with a pointed trident tip at the top.
 - Crossbow: a horizontal bow mounted on a vertical stock, forming a cross/T shape.
 - Staff: a single tall straight rod with a small ornament at the top.
-- Wand: a DARK SQUARE icon showing a tall rectangular tome/book standing upright, with a thin wand rod leaning against or attached to it. The tome is the dominant shape — it looks like a book standing on its side. NOT a shield.
-- Gauntlet: a fist or glove icon, sometimes showing knuckle spikes or a clenched armored hand.
-- DO NOT default to SnS when uncertain — Greatsword is far more likely for any single sword icon.
-- DO NOT confuse Wand and Longbow — Longbow has two lines, Wand has a rod attached to a tome.
-- DO NOT confuse Spear and Dagger — Spear is a single long pole, Dagger are two crossed short blades.
+- Orb: a round orb or sphere with a swirling design.
 ${hasLegend ? '- Compare each scoreboard icon against the legend in Image 1 before deciding.\n' : ''}- If still uncertain about a weapon, use "Unknown" rather than guessing.
 - The ONLY valid weapon names are: Wand, Longbow, Orb, Greatsword, Spear, Dagger, Crossbow, SnS, Staff, Gauntlet, Unknown.
 
