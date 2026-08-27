@@ -268,7 +268,8 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // catalog item behind them, just a recipient, a type, and an amount, and (unlike
   // gear) the same currency is routinely given to the same person more than once.
   // Shard types come from shared/shards.json — the same list the "Archboss Shards"
-  // wishlist page uses — so both features track the same 4 shards under the same keys.
+  // wishlist page uses — so both features track the same shards under the same
+  // keys, and adding one there adds it here too.
   const CURRENCIES = new Set(['lucent', ...SHARDS.types.map((t) => t.key)]);
 
   router.get('/currency-awards', async (req, res) => {

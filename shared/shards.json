@@ -5,6 +5,8 @@
     { "key": "scorched_branches", "label": "Scorched Branches" },
     { "key": "scorched_frostblooms", "label": "Scorched Frostblooms" },
     { "key": "queen_ashen_carapace", "label": "Queen Ashen Carapace" },
-    { "key": "thundercloud_scale", "label": "Thundercloud Scale" }
+    { "key": "thundercloud_scale", "label": "Thundercloud Scale" },
+    { "key": "thunderstruck_snow_flowers", "label": "Thunderstruck Snow Flowers" },
+    { "key": "thunderstruck_giant_tree_branch", "label": "Thunderstruck Giant Tree Branch" }
   ]
 }

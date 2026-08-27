@@ -103,7 +103,7 @@ export default function Shards() {
   const weaponModalMember = weaponModalId ? members.find((m) => m.id === weaponModalId) : null;
 
   return (
-    <PageShell maxWidth="max-w-[1400px]">
+    <PageShell maxWidth="max-w-[1700px]">
       <p className="text-sm text-ash mb-5">
         {can('loot.awards')
           ? 'Track every member’s shard requests. You can edit any row.'
@@ -129,7 +129,7 @@ export default function Shards() {
         <EmptyState>No members found.</EmptyState>
       ) : (
         <div className="panel rounded-lg overflow-auto max-h-[70vh]">
-          <table className="w-full min-w-[1160px] text-sm border-separate border-spacing-0">
+          <table className="w-full min-w-[1500px] text-sm border-separate border-spacing-0">
             <thead>
               <tr className="eyebrow text-[10px] text-ash">
                 <th className="sticky top-0 z-10 bg-panel p-4 text-left font-normal border-b border-line">Member</th>
