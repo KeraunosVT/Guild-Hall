@@ -1,5 +1,5 @@
 import { Sword, Target, Heart, Users, ShieldAlert, Pencil, Trash2, Share2, Map as MapIcon } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../auth';
@@ -7,7 +7,7 @@ import weaponToClass from '../../../shared/weaponClasses.json';
 import ErrorState from '../components/ui/ErrorState';
 import EmptyState from '../components/ui/EmptyState';
 import { PageShell } from '../components/ui/PageShell';
-import { Table, Thead, Tr } from '../components/ui/Table';
+import { Table, Thead, Tr, SortableTh } from '../components/ui/Table';
 import { useFlash } from '../components/ui/useFlash';
 import Toast from '../components/ui/Toast';
 
@@ -20,6 +20,54 @@ function getClassName(weapon1, weapon2) {
   key = (w2 + w1).replace(/\s+/g, '');
   if (weaponToClass[key]) return weaponToClass[key];
   return `${w1} ${w2}`.trim();
+}
+
+const MAP_COLUMNS = [
+  { key: 'map', label: 'Map' },
+  { key: 'played', label: 'Played', align: 'center' },
+  { key: 'wins', label: 'Wins', align: 'center' },
+  { key: 'losses', label: 'Losses', align: 'center' },
+  { key: 'draws', label: 'Draws', align: 'center' },
+  { key: 'winPct', label: 'Win %', align: 'center' },
+];
+
+const ROSTER_COLUMNS = [
+  { key: 'rank', label: 'Rank' },
+  { key: 'class_name', label: 'Class' },
+  { key: 'guild_name', label: 'Guild' },
+  { key: 'player_name', label: 'Player' },
+  { key: 'kills', label: 'Kills', align: 'center' },
+  { key: 'assists', label: 'Assists', align: 'center' },
+  { key: 'damage_dealt', label: 'Dmg Dealt', align: 'center' },
+  { key: 'damage_taken', label: 'Dmg Taken', align: 'center' },
+  { key: 'healing', label: 'Healing', align: 'center' },
+];
+
+// Both tables on this page sort independently, so the toggle and the comparator
+// live here once rather than twice over. A null key means "leave the server's
+// order alone" — the Map Record already arrives sorted by matches played and
+// the roster by scoreboard rank, so nothing moves until a header is clicked.
+function useTableSort(rows) {
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState('desc');
+
+  const sortBy = (key) => {
+    if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    // Names read best A–Z, numbers best-first; pick the direction each wants.
+    else { setSortKey(key); setSortDir(typeof rows[0]?.[key] === 'string' ? 'asc' : 'desc'); }
+  };
+
+  const sorted = useMemo(() => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = a[sortKey], vb = b[sortKey];
+      if (typeof va === 'string' || typeof vb === 'string') return String(va || '').localeCompare(String(vb || '')) * dir;
+      return ((Number(va) || 0) - (Number(vb) || 0)) * dir;
+    });
+  }, [rows, sortKey, sortDir]);
+
+  return { sortKey, sortDir, sortBy, sorted };
 }
 
 export default function MatchStats() {
@@ -118,6 +166,15 @@ export default function MatchStats() {
     }
   };
 
+  // Class is derived from the two weapon columns, so it has to be resolved
+  // before sorting — otherwise the Class header would sort by weapon_1.
+  const rosterRows = useMemo(
+    () => players.map((p) => ({ ...p, class_name: getClassName(p.weapon_1, p.weapon_2) })),
+    [players],
+  );
+  const roster = useTableSort(rosterRows);
+  const maps = useTableSort(mapStats);
+
   const topKills = [...players].sort((a, b) => (b.kills || 0) - (a.kills || 0)).slice(0, 10);
   const topDamage = [...players].sort((a, b) => (b.damage_dealt || 0) - (a.damage_dealt || 0)).slice(0, 10);
   const topDamageTaken = [...players].sort((a, b) => (b.damage_taken || 0) - (a.damage_taken || 0)).slice(0, 10);
@@ -153,15 +210,13 @@ export default function MatchStats() {
           </h3>
           <Table minWidth="min-w-[480px]">
             <Thead>
-              <th className="text-left p-2.5 font-normal">Map</th>
-              <th className="text-center p-2.5 font-normal">Played</th>
-              <th className="text-center p-2.5 font-normal">Wins</th>
-              <th className="text-center p-2.5 font-normal">Losses</th>
-              <th className="text-center p-2.5 font-normal">Draws</th>
-              <th className="text-center p-2.5 font-normal">Win %</th>
+              {MAP_COLUMNS.map((c) => (
+                <SortableTh key={c.key} label={c.label} sortKey={c.key} activeKey={maps.sortKey}
+                  dir={maps.sortDir} onSort={maps.sortBy} align={c.align} dense />
+              ))}
             </Thead>
             <tbody className="font-mono">
-              {mapStats.map((s) => (
+              {maps.sorted.map((s) => (
                 <tr key={s.map} className="border-b border-line/60 last:border-0">
                   <td className="p-2.5 font-sans font-medium text-brassbright">{s.map}</td>
                   <td className="p-2.5 text-center text-bone">{s.played}</td>
@@ -307,21 +362,16 @@ export default function MatchStats() {
             </h3>
             <Table maxHeight="max-h-[620px]" minWidth="min-w-[900px]">
               <Thead sticky>
-                <th className="text-left p-2.5 font-normal">Rank</th>
-                <th className="text-left p-2.5 font-normal">Class</th>
-                <th className="text-left p-2.5 font-normal">Guild</th>
-                <th className="text-left p-2.5 font-normal">Player</th>
-                <th className="text-center p-2.5 font-normal">Kills</th>
-                <th className="text-center p-2.5 font-normal">Assists</th>
-                <th className="text-center p-2.5 font-normal">Dmg Dealt</th>
-                <th className="text-center p-2.5 font-normal">Dmg Taken</th>
-                <th className="text-center p-2.5 font-normal">Healing</th>
+                {ROSTER_COLUMNS.map((c) => (
+                  <SortableTh key={c.key} label={c.label} sortKey={c.key} activeKey={roster.sortKey}
+                    dir={roster.sortDir} onSort={roster.sortBy} align={c.align} dense />
+                ))}
               </Thead>
               <tbody className="font-mono">
-                {players.map((p, i) => (
-                  <Tr key={i}>
+                {roster.sorted.map((p) => (
+                  <Tr key={`${p.rank}-${p.player_name}`}>
                     <td className="p-2.5 text-brass">{p.rank}</td>
-                    <td className="p-2.5 font-sans font-medium text-brassbright">{getClassName(p.weapon_1, p.weapon_2)}</td>
+                    <td className="p-2.5 font-sans font-medium text-brassbright">{p.class_name}</td>
                     <td className="p-2.5 font-sans text-ash">{p.guild_name}</td>
                     <td className="p-2.5 font-sans font-semibold text-bone">{p.player_name}</td>
                     <td className="p-2.5 text-center text-brassbright">{p.kills || 0}</td>
