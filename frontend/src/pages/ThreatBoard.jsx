@@ -17,7 +17,8 @@ import { useFlash } from '../components/ui/useFlash';
 // The guild list and threat ratings come from the community spreadsheet and ship
 // as static data (shared/threatBoard.json). The alliance map on top of them is
 // shared too — one map for everyone, not per-guild — so anyone may read it and
-// only an officer holding the 'threat' capability may change it.
+// only Guild Hall staff may change it — a platform role, not a guild
+// capability, so no house can grant it to itself. See backend/staff.js.
 //
 // TWO AXES, TWO VISUAL CHANNELS. Threat rating owns colour, because there are
 // six ratings and colour is the only channel that separates six things at a
@@ -47,7 +48,7 @@ const byStrength = (a, b) => (b.king ? 1 : 0) - (a.king ? 1 : 0)
 //
 //   1. the crown — whoever holds the cluster leads it, bonded or not, because
 //      it is the guild every other guild on the column is measured against;
-//   2. alliances — the thing an officer opens this page to find, so a pair does
+//   2. alliances — the thing a reader opens this page to find, so a pair does
 //      not sit down the column behind guilds that matter less;
 //   3. everything else, strongest first.
 //
@@ -128,7 +129,7 @@ function GuildChip({ guild, partner, picking, canEdit, onPick }) {
 }
 
 // Page chrome for a page with no guild behind it. Deliberately thin: a
-// wordmark home, and a way in for whoever turns out to be an officer.
+// wordmark home, and a way in for whoever turns out to run the place.
 function PublicShell({ children }) {
   const { user, login } = useAuth();
   return (
@@ -401,7 +402,7 @@ export default function ThreatBoard() {
         <a href={data.source} target="_blank" rel="noopener noreferrer" className="text-brass hover:text-brassbright">
           community threat spreadsheet
         </a>{' '}
-        (last refreshed {data.importedAt}). The alliance map is maintained by guild officers.
+        (last refreshed {data.importedAt}). The alliance map is maintained by Guild Hall staff.
       </p>
     </PageShell>
     </PublicShell>

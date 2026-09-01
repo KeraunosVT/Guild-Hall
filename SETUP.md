@@ -113,6 +113,9 @@ Set the environment variables below (locally: put them in `backend/.env`).
 | `DISCORD_ADMIN_ROLE_IDS` | Strongly recommended | Empty = nobody is admin until granted via… the admin page. Set it. |
 | `GEMINI_API_KEY` | Strongly recommended | Without it, screenshot parsing (matches + gear) is unavailable; CSV upload still works |
 | `APP_URL` | Recommended | Your site's public URL; used for post-login redirects (default `/` works when same-origin) |
+| `GUILD_HALL_STAFF_ROLE_ID` | Optional | Role in the Guild Hall HQ server whose holders may edit the public threat board. Needs `GUILD_HALL_STAFF_GUILD_ID` and the bot in that server. Platform-wide, not a guild capability — it cannot be granted from any admin page |
+| `GUILD_HALL_STAFF_GUILD_ID` | With the above | Discord server id the staff role lives in |
+| `GUILD_HALL_STAFF_IDS` | Optional | Comma-separated Discord user ids that are always staff. Works without a bot, and keeps you in when Discord is down. With none of these three set, the threat board is read-only for everyone |
 | `DISCORD_ALLOWED_ROLE_IDS` | Optional | Empty = any server member may log in |
 | `DISCORD_MEMBER_ROLE_IDS` | Optional | Defaults to `DISCORD_ALLOWED_ROLE_IDS` |
 | `DISCORD_ROSTER_CHANNEL_ID` | Optional | Needed to post rosters |

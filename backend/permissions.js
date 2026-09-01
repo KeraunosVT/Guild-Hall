@@ -38,11 +38,6 @@ const ALL_PERMISSIONS = [
   // change who is allowed to sign in.
   { key: 'settings', label: 'Guild Settings', hint: 'House identity, timezone, Discord roles and channels' },
   { key: 'loa.admin', label: 'LOA Officer', hint: "See LOA reasons, cancel others', file on behalf" },
-  // Reading the threat board needs no capability — it is a member page. This
-  // covers editing the alliance map on it, which the whole guild plans around.
-  // Checked inline in server.js, not via ROUTE_PERMISSIONS: the routes live at
-  // /api/threat-board rather than under the /api/admin mount that table serves.
-  { key: 'threat', label: 'Threat Board', hint: 'Map guild alliances on the Americas board' },
   { key: 'loot.awards', label: 'Loot — Awards', hint: 'Award and revoke items, tag builds' },
   { key: 'loot.catalog', label: 'Loot — Catalog', hint: 'Manage loot items and categories' },
   { key: 'loot.currency', label: 'Loot — Lucent & Shards', hint: 'Grant and edit currency' },

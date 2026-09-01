@@ -12,8 +12,8 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const {
-  router: authRouter, requireAuth, optionalAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
-  applyGuildAccess,
+  router: authRouter, requireAuth, optionalAuth, requireAdminArea, requirePermission, userHas,
+  hasValidSession, applyGuildAccess,
 } = require('./auth');
 const { listMembers, listRoles } = require('./discord');
 const createGuildContext = require('./guildContext');
@@ -251,13 +251,18 @@ app.post('/api/early-access', earlyAccessLimiter, async (req, res) => {
 //
 // The guild list and threat ratings are a static import identical for everyone.
 // The alliance map is shared too — one map, global rather than guild-scoped
-// (see GLOBAL_TABLES in tenantDb.js) — so writing it is what needs a gate:
-// requireAuth first, then the 'threat' capability. Note the consequence, which
-// is unusual for this backend: an officer holding 'threat' edits what every
-// other house sees, which is why the actor is recorded on each change.
-const canEditThreat = [requireAuth, (req, res, next) => (userHas(req.user, 'threat')
+// (see GLOBAL_TABLES in tenantDb.js) — so writing it is gated on running Guild
+// Hall itself, NOT on any guild capability.
+//
+// That distinction is the whole point. No officer, however senior in their own
+// house, has standing to rewrite a record every other house reads; and this
+// board sits outside the tenancy model entirely, so there is no guild whose
+// permissions could sensibly answer for it. req.user.staff is resolved from
+// deploy-time configuration at login and can't be granted from any tenant's
+// admin page — see backend/staff.js.
+const canEditThreat = [requireAuth, (req, res, next) => (req.user?.staff
   ? next()
-  : res.status(403).json({ error: 'You do not have permission to edit the threat board.' }))];
+  : res.status(403).json({ error: 'Only Guild Hall staff can edit the threat board.' }))];
 
 // Who to blame for a change, for the updated_by column. Not a security control
 // — the capability check above is — just a legible record on a shared map.
@@ -270,7 +275,7 @@ app.get('/api/threat-board', optionalAuth, async (req, res) => {
   res.json({
     ...threatBoard.board,
     allies: await threatBoard.allies(),
-    canEdit: userHas(req.user, 'threat'),
+    canEdit: !!req.user?.staff,
   });
 });
 

@@ -7,9 +7,13 @@
 // be a loot officer in one house and a plain member in another, so the token
 // carries a list:
 //
-//   { id, username, avatar, verified_at, guilds: [ Membership, … ] }
+//   { id, username, avatar, verified_at, staff, guilds: [ Membership, … ] }
 //   Membership = { guild_id, discord_guild_id, house, tag,
 //                  permissions, fullAccess }
+//
+// `staff` is the lone exception to everything below: it means "operates Guild
+// Hall itself" rather than "may do X in house Y", so it sits outside the
+// membership list and applyGuildAccess never touches it. See backend/staff.js.
 //
 // Discord role ids are NOT carried: they are consumed at login to resolve
 // `permissions` and nothing reads them afterwards, while they were the biggest
@@ -30,6 +34,7 @@ const axios = require('axios');
 const { fetchMember, botConfigured } = require('./discord');
 const perms = require('./permissions');
 const guildRegistry = require('./guildRegistry');
+const staff = require('./staff');
 // Just the header name — requiring the module's factory would be a cycle.
 const { GUILD_HEADER } = require('./guildContext');
 
@@ -200,7 +205,7 @@ router.get('/discord/callback', async (req, res) => {
     }
 
     // 4. Issue a signed session cookie carrying every membership.
-    issueSession(res, buildSession(user, memberships));
+    issueSession(res, await buildSession(user, memberships));
 
     res.redirect(APP_URL);
   } catch (err) {
@@ -248,6 +253,9 @@ router.get('/me', (req, res) => {
         // than stripping a working session's access mid-flight.
         permissions: user.permissions || (user.isAdmin ? perms.ALL_PERMISSIONS.map((p) => p.key) : []),
         fullAccess: user.fullAccess ?? !!user.isAdmin,
+        // Runs Guild Hall itself, not any house — survives applyGuildAccess
+        // because it was never part of a membership. See backend/staff.js.
+        staff: !!user.staff,
         activeGuildId: active || null,
         // Enough for a guild switcher, and nothing more — roles and per-guild
         // capabilities stay inside the token.
@@ -382,12 +390,18 @@ async function buildMemberships(accessToken, hosted) {
 // Assemble the signed token. Capabilities live per-membership, never at the top
 // level, so nothing downstream can read a capability without having chosen a
 // guild first.
-function buildSession(u, memberships) {
+// `staff` is who runs Guild Hall itself, and is the one flag here that is not
+// about any guild — see backend/staff.js. It rides top-level rather than inside
+// a membership precisely because it belongs to no house, so applyGuildAccess
+// leaves it alone when it narrows everything else to the active guild. One
+// boolean, so it costs the cookie nothing.
+async function buildSession(u, memberships) {
   return {
     id: u.id,
     username: u.global_name || u.username || 'Member',
     avatar: u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png` : null,
     guilds: memberships,
+    staff: await staff.isStaff(u.id),
     verified_at: Date.now(),
   };
 }
