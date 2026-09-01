@@ -33,6 +33,7 @@ const createEventSignups = require('./eventSignups');
 const createLateAttendance = require('./lateAttendance');
 const createEventDetail = require('./eventDetail');
 const createAuditLog = require('./auditLog');
+const createThreatBoard = require('./threatBoard');
 
 const gearUpload = multer({
   storage: multer.memoryStorage(),
@@ -112,6 +113,9 @@ try {
 
 const lootCatalog = supabase ? createLootCatalog(supabase) : null;
 const eliteTimers = supabase ? createEliteTimers(supabase) : null;
+// The threat board's guild list is a static import, so this only needs a client
+// for the alliance map layered on top of it.
+const threatBoard = supabase ? createThreatBoard(supabase) : null;
 const gearIlvl = supabase ? createGearIlvl(supabase) : null;
 const identities = supabase ? createIdentities(supabase) : null;
 // identities is built above: LOA display names resolve through it so an
@@ -541,6 +545,56 @@ app.get('/api/elite-timers', async (req, res) => {
   if (!eliteTimers) return res.status(503).json({ error: 'Database not configured.' });
   const timers = await eliteTimers.all(req.guildId);
   res.json({ timers, locations: eliteTimers.locations });
+});
+
+// ── THREAT BOARD ─────────────────────────────────────────────────────────────
+// The wider Americas server, not this house: the guild list and threat ratings
+// are a static import from the community spreadsheet, identical for every
+// tenant. Only the alliance map is guild data, and it is scoped like anything
+// else.
+//
+// Reading is open to any member — knowing who is dangerous is why the page
+// exists. Writing takes the 'threat' capability, because an alliance map the
+// whole guild plans around should not be something any one member can redraw.
+// Gated inline rather than under /api/admin, since the page is a member page
+// with officer controls on it, the same shape as /loa and /signups.
+const canEditThreat = (req, res, next) => (userHas(req.user, 'threat')
+  ? next()
+  : res.status(403).json({ error: 'You do not have permission to edit the threat board.' }));
+
+app.get('/api/threat-board', async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  const marks = await threatBoard.marks(req.guildId);
+  res.json({ ...threatBoard.board, ...marks, canEdit: userHas(req.user, 'threat') });
+});
+
+app.post('/api/threat-board/ally', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  const { a, b } = req.body || {};
+  try {
+    res.json(await threatBoard.setAlly(req.guildId, a, b));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to save the alliance.' });
+  }
+});
+
+app.delete('/api/threat-board/ally/:name', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json(await threatBoard.clearAlly(req.guildId, req.params.name));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to break the alliance.' });
+  }
+});
+
+app.delete('/api/threat-board/marks', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    await threatBoard.clearAll(req.guildId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to clear the board.' });
+  }
 });
 
 // Per-map win/loss record, for the War Record page.

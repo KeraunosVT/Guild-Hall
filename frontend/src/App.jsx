@@ -34,6 +34,7 @@ import GearLevel from './pages/GearLevel';
 import GearLevels from './pages/GearLevels';
 import AuditLog from './pages/AuditLog';
 import GuildSettings from './pages/GuildSettings';
+import ThreatBoard from './pages/ThreatBoard';
 
 function Layout() {
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
@@ -139,6 +140,11 @@ function Gate() {
               inline — reading the record is not an officer action, and this is
               where a member notices they are missing from it. */}
           <Route path="/attendance/:id" element={<EventAttendance />} />
+          {/* The wider Americas server rather than this house: the guild list
+              and threat ratings are the same for every tenant, and only the
+              alliance map layered on them is guild data. Sits outside the
+              guild-scoped sections of the nav for that reason. */}
+          <Route path="/threat-board" element={<ThreatBoard />} />
           <Route path="/classes" element={<Classes />} />
           <Route path="/gear" element={<GearLevel />} />
           <Route path="/admin" element={<Admin />} />

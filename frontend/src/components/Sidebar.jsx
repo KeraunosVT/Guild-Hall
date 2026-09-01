@@ -3,7 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
-  Terminal, Heart, CalendarCheck, CalendarRange,
+  Terminal, Heart, CalendarCheck, CalendarRange, Radar,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -14,6 +14,14 @@ export const guildLinks = [
   { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard },
   { to: '/war-record', label: 'War Record', icon: Swords },
   { to: '/roster', label: 'Roster', icon: Users },
+];
+
+// Pages about the game world rather than this house. Its own section because
+// the distinction is real: nothing here is guild data, and filing it under
+// "Guild" would imply the threat ratings are ours to edit. Everyone sees it —
+// editing the alliance map is what takes the 'threat' capability.
+export const worldLinks = [
+  { to: '/threat-board', label: 'Threat Board', icon: Radar },
 ];
 
 export const memberLinks = [
@@ -108,6 +116,7 @@ export default function Sidebar({ collapsed }) {
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         <NavSection title="Guild" links={guildLinks} linkClass={linkClass} collapsed={collapsed} />
         {user && <NavSection title="Member" links={memberLinks} linkClass={linkClass} collapsed={collapsed} />}
+        <NavSection title="World" links={worldLinks} linkClass={linkClass} collapsed={collapsed} />
         {adminNav.length > 0 && <NavSection title="Admin" links={adminNav} linkClass={linkClass} collapsed={collapsed} />}
       </nav>
 

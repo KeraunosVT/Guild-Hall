@@ -1,0 +1,938 @@
+{
+  "source": "https://docs.google.com/spreadsheets/d/12zpGeVx7EeCT-AlYXGHEKnR01bER49wRKvt-owCjTZ8/edit",
+  "importedAt": "2026-09-01",
+  "clusters": [
+    {
+      "label": "DESPAIR",
+      "servers": "Zairos + Oblivion + Moonstone + Invoker"
+    },
+    {
+      "label": "ASCENSION",
+      "servers": "Adrenaline + Carnage"
+    },
+    {
+      "label": "DISTORTION",
+      "servers": "Snowburn + Stellarite"
+    },
+    {
+      "label": "ENCHANTED",
+      "servers": "Ivory + Vulcan + Roen"
+    },
+    {
+      "label": "ECLIPSE",
+      "servers": "Deluzhnoa + Starlight + Resistance + Eldritch"
+    }
+  ],
+  "guilds": [
+    {
+      "name": "Appa",
+      "cluster": "DESPAIR",
+      "status": "Rebuild/TBD",
+      "cd": "No CD",
+      "king": true
+    },
+    {
+      "name": "Gear Gap (FTP)",
+      "cluster": "ASCENSION",
+      "status": "Threat",
+      "cd": "No CD",
+      "king": true
+    },
+    {
+      "name": "Missionary",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": true
+    },
+    {
+      "name": "Undercooked",
+      "cluster": "ENCHANTED",
+      "status": "Threat",
+      "cd": "No CD",
+      "king": true
+    },
+    {
+      "name": "Lokthar",
+      "cluster": "ECLIPSE",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": true
+    },
+    {
+      "name": "Dusk",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Ping Gap (Ma Vontade)",
+      "cluster": "ASCENSION",
+      "status": "Threat",
+      "cd": "30 Days",
+      "king": false
+    },
+    {
+      "name": "Backshotz",
+      "cluster": "DISTORTION",
+      "status": "Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Jailed",
+      "cluster": "ENCHANTED",
+      "status": "Threat",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Project Nix",
+      "cluster": "ECLIPSE",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Unhinged",
+      "cluster": "DESPAIR",
+      "status": "Competitive",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Villainous",
+      "cluster": "ASCENSION",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Lotus",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Pirates",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "NHOX",
+      "cluster": "ECLIPSE",
+      "status": "Potential",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Big Chillin",
+      "cluster": "DESPAIR",
+      "status": "Competitive",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "REEPORS",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "DehydratedGamers",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "The Cyndicate",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Enfasis",
+      "cluster": "ECLIPSE",
+      "status": "Not Competitive",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Supple",
+      "cluster": "DESPAIR",
+      "status": "Competitive",
+      "cd": "30 Days",
+      "king": false
+    },
+    {
+      "name": "Repentant Faith",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Swoosh",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Metamorphosis",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Hanami",
+      "cluster": "ECLIPSE",
+      "status": "Rebuild/TBD",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "MILK",
+      "cluster": "DESPAIR",
+      "status": "Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "WANTED",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Paragon",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Jasmine Dragons",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Epoca Dourada",
+      "cluster": "ECLIPSE",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Ting Force One",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Uppies",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Lost Tavern",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "ReaperZ",
+      "cluster": "ECLIPSE",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Zenkai",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Mimirca",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "The Privateers",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Original Sin",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "OsPaisdeFamilia",
+      "cluster": "ECLIPSE",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Hated",
+      "cluster": "DESPAIR",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Ripley Rebellion",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Darkness",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "30 Days",
+      "king": false
+    },
+    {
+      "name": "OFF META",
+      "cluster": "ECLIPSE",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Revenants",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Threnody",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Endurance",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "30 Days",
+      "king": false
+    },
+    {
+      "name": "Delirium",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "LMTYS",
+      "cluster": "ECLIPSE",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Badrep",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Twisted Fates",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Abandoned",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Blair",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Scarlet Lotus",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Cursed Touch",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Zenith",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Animate",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Syndicate",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "NN",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Sacred knightz",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "SchoolOfTheWolf",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Preguicinha",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Virtuous",
+      "cluster": "DISTORTION",
+      "status": "Potential",
+      "cd": "15 Days",
+      "king": false
+    },
+    {
+      "name": "Fedaykins",
+      "cluster": "ENCHANTED",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Machado",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Kaoanashi",
+      "cluster": "DESPAIR",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "GarraNocturna",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Flame",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Nube Tormenta",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Bubble Blowers",
+      "cluster": "ENCHANTED",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Kingless",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Baywatch",
+      "cluster": "DESPAIR",
+      "status": "Potential",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Glass Cannon",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Isekaid",
+      "cluster": "ENCHANTED",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Acme",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Sangre Latina",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Nordik",
+      "cluster": "ENCHANTED",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Language Barrier",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Horizon",
+      "cluster": "DESPAIR",
+      "status": "Potential",
+      "cd": "30 Days",
+      "king": false
+    },
+    {
+      "name": "SquanchySquad",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "GOMDOL",
+      "cluster": "ENCHANTED",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Ma Vontade (transfer)",
+      "cluster": "ECLIPSE",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "xxxWICKEDxxx",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "CURSED",
+      "cluster": "ENCHANTED",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Boba Tea",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Barely Active",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "KittyDeathCult",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Straw Hats",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Sprouts",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Voidwalker",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Poached",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Immortal",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Virtue",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Hive",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "The Voidbourne",
+      "cluster": "ASCENSION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Slappin Em",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Division XII",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Disregarded",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Huracan",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Evicted",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "-Akatsuki-",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Glassy",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Menace",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Stay Loyal",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Night Raid",
+      "cluster": "DESPAIR",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Mictlan",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "NoDamage",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Original Sin",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Corgi Club",
+      "cluster": "DESPAIR",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Yoink亗",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Cream",
+      "cluster": "DESPAIR",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Sails",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Abyss",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "DefinitelyaCult",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Los Michis",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "SAUVAGE",
+      "cluster": "DISTORTION",
+      "status": "Not Competitive",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "WeTheOpps",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "TRICKSTER",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "SmokeTopia",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Betrayed",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Supple Dash",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "NewWhaleOrder",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Compty",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Mortuary",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Gwenchana",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Raging",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Homies",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Wild",
+      "cluster": "ASCENSION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "Night",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "UWU",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    },
+    {
+      "name": "sit dog",
+      "cluster": "DISTORTION",
+      "status": "Disbanded/Merged",
+      "cd": "No CD",
+      "king": false
+    }
+  ]
+}
