@@ -189,23 +189,42 @@ router.get('/discord/callback', async (req, res) => {
     }
     const accessToken = tokenRes.data.access_token;
 
-    // 2. Which guilds we host is this user actually in?
+    // 2. Who is this? Asked first, and independently of any guild.
+    //
+    // Identity used to be a by-product of evaluating memberships, which tied
+    // "who are you" to "are you an approved member somewhere". Those are
+    // different questions, and conflating them locked the people who run Guild
+    // Hall out of Guild Hall: a platform operator who is not an approved member
+    // of any tenant could never get a session, and so could never reach the
+    // surfaces that exist precisely because they belong to no tenant.
+    const identity = (await axios.get('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: (s) => s < 500,
+    })).data || {};
+    const isStaff = await staff.isStaff(identity.id);
+
+    // 3. Which guilds we host is this user actually in?
     const hosted = await discoverHostedGuilds(accessToken);
-    if (!hosted.length) {
-      return res.redirect(`${APP_URL}?auth=not_member`);
+
+    // 4. Read their member object in each, and evaluate roles per guild.
+    const { memberships, user } = hosted.length
+      ? await buildMemberships(accessToken, hosted)
+      : { memberships: [], user: {} };
+
+    // Staff pass both gates below. Everyone else must be in a guild we host
+    // (not_member) AND clear its role bar (forbidden) — the two failures stay
+    // distinct because they have entirely different fixes.
+    if (!isStaff) {
+      if (!hosted.length) return res.redirect(`${APP_URL}?auth=not_member`);
+      if (!memberships.length) return res.redirect(`${APP_URL}?auth=forbidden`);
     }
 
-    // 3. Read their member object in each, and evaluate roles per guild.
-    const { memberships, user } = await buildMemberships(accessToken, hosted);
-
-    // In none of them do their roles clear the bar. Distinct from not_member:
-    // they are in the server, they just aren't allowed into the app.
-    if (!memberships.length) {
-      return res.redirect(`${APP_URL}?auth=forbidden`);
-    }
-
-    // 4. Issue a signed session cookie carrying every membership.
-    issueSession(res, await buildSession(user, memberships));
+    // 5. Issue a signed session cookie carrying every membership.
+    //
+    // Identity falls back to /users/@me because buildMemberships only reports a
+    // user for guilds that answered — a staff member in no hosted guild has
+    // none, and would otherwise get a session with no id at all.
+    issueSession(res, await buildSession(user.id ? user : identity, memberships, isStaff));
 
     res.redirect(APP_URL);
   } catch (err) {
@@ -395,13 +414,15 @@ async function buildMemberships(accessToken, hosted) {
 // a membership precisely because it belongs to no house, so applyGuildAccess
 // leaves it alone when it narrows everything else to the active guild. One
 // boolean, so it costs the cookie nothing.
-async function buildSession(u, memberships) {
+// `isStaff` is passed in when the caller has already resolved it, so a login
+// does not ask Discord the same question twice; omitted, it is resolved here.
+async function buildSession(u, memberships, isStaff) {
   return {
     id: u.id,
     username: u.global_name || u.username || 'Member',
     avatar: u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png` : null,
     guilds: memberships,
-    staff: await staff.isStaff(u.id),
+    staff: isStaff === undefined ? await staff.isStaff(u.id) : !!isStaff,
     verified_at: Date.now(),
   };
 }
@@ -559,6 +580,16 @@ async function reverify(user) {
   if (!list.length && SINGLE_GUILD_ID) {
     const pinned = await guildRegistry.resolveById(db, SINGLE_GUILD_ID);
     if (pinned) list = [{ guild_id: pinned.id, discord_guild_id: pinned.discord_guild_id }];
+  }
+
+  // A staff-only session carries no memberships BY DESIGN — running the
+  // platform does not require belonging to any tenant. Treating that empty list
+  // as "nothing to re-verify" would mean someone removed from the staff role
+  // kept platform access until their 7-day token expired, so re-ask instead.
+  // Guarded on Array.isArray so a pre-multi-guild session, which also has no
+  // list, still falls through to the untouched legacy path below.
+  if (!list.length && Array.isArray(user.guilds) && user.staff) {
+    return (await staff.isStaff(user.id)) ? buildSession(user, [], true) : REVOKED;
   }
   if (!list.length) return null;
 

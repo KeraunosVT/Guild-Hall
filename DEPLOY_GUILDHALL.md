@@ -143,6 +143,17 @@ SUPABASE_SERVICE_KEY=
 # Session — generate on the droplet: openssl rand -hex 32
 JWT_SECRET=
 
+# Guild Hall staff — who operates the PLATFORM, not any one guild.
+# Gates editing on the public threat board (/threat-board), which belongs to no
+# tenant. Env-only on purpose: no guild's admin page can grant it. Leave all
+# three empty and the board is read-only for everyone — which is what a 403 on
+# every edit means. The bot must be in the HQ server for the role check to work.
+GUILD_HALL_STAFF_GUILD_ID=
+GUILD_HALL_STAFF_ROLE_ID=
+# Optional escape hatch: Discord user ids that are always staff, comma
+# separated. Needs no bot, and still works when Discord is unreachable.
+GUILD_HALL_STAFF_IDS=
+
 # Gemini — aistudio.google.com/apikey
 GEMINI_API_KEY=
 
@@ -260,3 +271,4 @@ Future updates: commit+sync in VS Code →
 | Slash commands missing | Invite included `applications.commands`? Gateway log shows registration? |
 | permission denied for table … | Baseline grants ran? (They're in `000_baseline.sql` now — re-run its Grants block) |
 | Could not find function … without parameters | Deployed code is pre-Path-A — confirm `p_guild_names` exists in `backend/server.js` on the droplet |
+| Threat board 403 on every edit | `GUILD_HALL_STAFF_*` missing from the droplet's `backend/.env` — they are not in the repo, so a `git pull` never adds them. Then `systemctl restart guildhall`, and sign out/in: `staff` is stamped into the session at login |

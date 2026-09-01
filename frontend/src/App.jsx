@@ -91,6 +91,15 @@ function GuildGate({ children }) {
             ? 'Sessions now carry which houses you belong to. Sign in again to continue — nothing has been lost.'
             : 'Your account may not belong to a house this hall serves yet.'}
         </p>
+        {/* Not every signed-in account has a house: Guild Hall staff can sign in
+            without belonging to any tenant, and land here. The threat board is
+            the surface that exists for exactly that case, so offer it rather
+            than leaving a valid session staring at a dead end. */}
+        {!needsReauth && (
+          <a href="/threat-board" className="text-brass hover:text-brassbright text-sm underline underline-offset-4">
+            Go to the Americas Threat Board
+          </a>
+        )}
         {needsReauth && (
           <button
             onClick={login}
