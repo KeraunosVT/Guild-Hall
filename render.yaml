@@ -53,3 +53,20 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # Who operates Guild Hall itself — NOT a per-guild setting, and the one
+      # exception to the rule above about guild config never living in env.
+      # It gates the public threat board, which belongs to no tenant, and it is
+      # env-only on purpose: no guild's admin page can promote someone to
+      # operating the platform. See backend/staff.js.
+      #
+      # Unset on an existing service until you add it in the dashboard —
+      # Environment → Add Environment Variable — because a blueprint change does
+      # not backfill values for a service that already exists. With none of the
+      # three set, the board is read-only for everyone, which is what a 403 on
+      # every edit means.
+      - key: GUILD_HALL_STAFF_GUILD_ID
+        sync: false # Discord server id of the Guild Hall HQ server
+      - key: GUILD_HALL_STAFF_ROLE_ID
+        sync: false # role in it whose holders may edit the board
+      - key: GUILD_HALL_STAFF_IDS
+        sync: false # optional: always-staff Discord user ids, comma separated
