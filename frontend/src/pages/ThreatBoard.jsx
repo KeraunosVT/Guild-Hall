@@ -30,7 +30,11 @@ import { useFlash } from '../components/ui/useFlash';
 // editing — the moment alliance borrows a hue, the board stops being scannable.
 const STATUSES = [
   { key: 'Threat', short: 'Threat', dot: 'bg-fuchsia-400', text: 'text-fuchsia-300', tint: 'bg-fuchsia-500/10' },
-  { key: 'Competitive', short: 'Competitive', dot: 'bg-amber-400', text: 'text-amber-300', tint: 'bg-amber-500/10' },
+  // Orange, not amber. Competitive and Potential sit next to each other in the
+  // ramp, and amber-400 was only ~8° of hue from yellow-300 — close enough that
+  // the two tiers read as one at chip size. Orange puts ~24° between them, and
+  // it is nearer the source sheet's own #FF9900 besides.
+  { key: 'Competitive', short: 'Competitive', dot: 'bg-orange-400', text: 'text-orange-300', tint: 'bg-orange-500/10' },
   { key: 'Potential', short: 'Potential', dot: 'bg-yellow-300', text: 'text-yellow-200', tint: 'bg-yellow-500/10' },
   { key: 'Rebuild/TBD', short: 'Rebuild / TBD', dot: 'bg-sky-400', text: 'text-sky-300', tint: 'bg-sky-500/10' },
   { key: 'Not Competitive', short: 'Not competitive', dot: 'bg-emerald-400', text: 'text-emerald-300', tint: 'bg-emerald-500/10' },
