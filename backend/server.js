@@ -272,11 +272,30 @@ app.get('/api/threat-board', optionalAuth, async (req, res) => {
   if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
   // optionalAuth rather than requireAuth: an anonymous visitor gets the board,
   // just without the editing affordances.
+  const [board, allies] = await Promise.all([threatBoard.board(), threatBoard.allies()]);
   res.json({
-    ...threatBoard.board,
-    allies: await threatBoard.allies(),
+    ...board,
+    allies,
     canEdit: !!req.user?.staff,
+    // The closed sets the editor's dropdowns are built from, so the page can
+    // never offer a value the database would reject.
+    statuses: threatBoard.STATUSES,
+    cds: threatBoard.CDS,
   });
+});
+
+// Edit one guild: rating, transfer cooldown, name, or which cluster it sits on
+// after a server transfer. Any subset; only what is sent changes.
+// Addressed by id, not name: two guilds on different servers may share a name
+// (see migrations/saas_008), so a name is not enough to identify one.
+app.patch('/api/threat-board/guild/:id', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  const { name, cluster, status, cd } = req.body || {};
+  try {
+    res.json(await threatBoard.updateGuild(req.params.id, { name, cluster, status, cd }, actorOf(req)));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to save the guild.' });
+  }
 });
 
 app.post('/api/threat-board/ally', canEditThreat, async (req, res) => {
@@ -289,10 +308,10 @@ app.post('/api/threat-board/ally', canEditThreat, async (req, res) => {
   }
 });
 
-app.delete('/api/threat-board/ally/:name', canEditThreat, async (req, res) => {
+app.delete('/api/threat-board/ally/:id', canEditThreat, async (req, res) => {
   if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
   try {
-    res.json(await threatBoard.clearAlly(req.params.name));
+    res.json(await threatBoard.clearAlly(req.params.id));
   } catch (e) {
     res.status(400).json({ error: e.message || 'Failed to break the alliance.' });
   }

@@ -33,11 +33,14 @@ const GLOBAL_TABLES = new Set([
   'market_potentials', // region-keyed market snapshots
   'guilds',            // the tenant registry itself (scoped by id, not guild_id)
   'storage',           // never reached via .from() here, listed for clarity
-  // The Americas alliance map. Global because the page that shows it is public
-  // and belongs to no house: who is allied to whom is a fact about the server,
-  // not about any one guild's data. Reads are open to anyone; writes are gated
-  // on the 'threat' capability in server.js. See migrations/saas_006.
+  // The Americas threat board. Global because the page that shows it is public
+  // and belongs to no house: which guilds exist, how dangerous they are and who
+  // is allied to whom are facts about the game world, not any one guild's data.
+  // Reads are open to anyone; writes take Guild Hall staff (backend/staff.js),
+  // checked at the route. See migrations/saas_006 and saas_007.
   'threat_alliances',
+  'threat_guilds',
+  'threat_clusters',
 ]);
 
 function tenantDb(supabase, guildId) {

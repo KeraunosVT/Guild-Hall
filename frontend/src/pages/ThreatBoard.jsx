@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
-import { Search, Link2, Link2Off, Crown } from 'lucide-react';
+import { Search, Link2, Link2Off, Crown, Pencil } from 'lucide-react';
 import { useAuth } from '../auth';
 import Sigil from '../components/Sigil';
 import { PageShell } from '../components/ui/PageShell';
 import EmptyState from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
 import Tabs from '../components/ui/Tabs';
 import { useFlash } from '../components/ui/useFlash';
 
@@ -14,11 +15,12 @@ import { useFlash } from '../components/ui/useFlash';
 // page chrome below instead of inheriting the sidebar: a visitor with no session
 // has no house for a sidebar to describe.
 //
-// The guild list and threat ratings come from the community spreadsheet and ship
-// as static data (shared/threatBoard.json). The alliance map on top of them is
-// shared too — one map for everyone, not per-guild — so anyone may read it and
-// only Guild Hall staff may change it — a platform role, not a guild
-// capability, so no house can grant it to itself. See backend/staff.js.
+// The board is seeded from the community spreadsheet (shared/threatBoard.json)
+// and then maintained here: ratings, transfer cooldowns, names and which cluster
+// a guild sits on after a server transfer are all editable, as is the alliance
+// map. One board for everyone, and only Guild Hall staff may change it — a
+// platform role, not a guild capability, so no house can grant it to itself.
+// See backend/staff.js and migrations/saas_007.
 //
 // TWO AXES, TWO VISUAL CHANNELS. Threat rating owns colour, because there are
 // six ratings and colour is the only channel that separates six things at a
@@ -59,18 +61,17 @@ const byStrength = (a, b) => (b.king ? 1 : 0) - (a.king ? 1 : 0)
 // A pair split across clusters, or with one half hidden by a filter, degrades to
 // two singles that each still name their partner on the chip.
 export function unitsFor(list, partnerOf) {
-  const byName = new Map();
-  for (const g of list) if (!byName.has(g.name)) byName.set(g.name, g);
+  // Keyed by id, not name: two guilds on different servers may share a name,
+  // so a name identifies nothing on its own.
+  const byId = new Map(list.map((g) => [g.id, g]));
 
-  // Tracked by object identity, not name: the board is imported from a
-  // hand-kept spreadsheet, and a repeated name would otherwise drop a row.
   const used = new Set();
   const pairs = [];
   const singles = [];
   for (const g of list) {
     if (used.has(g)) continue;
-    const partner = partnerOf(g.name);
-    const mate = partner ? byName.get(partner) : null;
+    const partnerId = partnerOf(g.id);
+    const mate = partnerId ? byId.get(partnerId) : null;
     if (mate && mate !== g && !used.has(mate)) {
       used.add(g);
       used.add(mate);
@@ -90,18 +91,18 @@ export function unitsFor(list, partnerOf) {
   return ordered;
 }
 
-function GuildChip({ guild, partner, picking, canEdit, onPick }) {
+function GuildChip({ guild, partner, picking, canEdit, onPick, onEdit }) {
   const m = META[guild.status];
   const dead = guild.status === DEAD;
   return (
     <div
-      className={`flex items-stretch rounded-lg border overflow-hidden transition-colors ${m.tint} ${
+      className={`group flex items-stretch rounded-lg border overflow-hidden transition-colors ${m.tint} ${
         picking ? 'border-brass ring-1 ring-brass' : 'border-transparent hover:border-line'
       }`}
     >
       <button
         type="button"
-        onClick={() => canEdit && onPick(guild.name)}
+        onClick={() => canEdit && onPick(guild)}
         disabled={!canEdit}
         title={canEdit ? `${guild.name} — click to pair` : guild.name}
         className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 text-left ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
@@ -124,7 +125,121 @@ function GuildChip({ guild, partner, picking, canEdit, onPick }) {
           <span className="shrink-0 font-mono text-[9px] px-1 py-px rounded border border-line text-ash">{guild.cd}</span>
         )}
       </button>
+      {/* Two targets rather than a mode switch: the chip body pairs, the pencil
+          edits. Faint until hover or focus so 130 of them don't shout. */}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => onEdit(guild)}
+          title={`Edit ${guild.name}`}
+          aria-label={`Edit ${guild.name}`}
+          className="w-6 shrink-0 flex items-center justify-center text-line hover:text-brassbright focus:text-brassbright group-hover:text-ash transition-colors"
+        >
+          <Pencil className="w-3 h-3" />
+        </button>
+      )}
     </div>
+  );
+}
+
+// Rating, transfer cooldown, name, and which cluster a guild sits on after a
+// server transfer. Every field is sent only when it actually changed, so a save
+// that touches one dropdown is a one-field patch.
+function GuildEditor({ guild, data, onClose, onSaved, flash }) {
+  const [name, setName] = useState(guild.name);
+  const [cluster, setCluster] = useState(guild.cluster);
+  const [status, setStatus] = useState(guild.status);
+  const [cd, setCd] = useState(guild.cd || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const trimmed = name.trim();
+  const patch = {};
+  if (trimmed && trimmed !== guild.name) patch.name = trimmed;
+  if (cluster !== guild.cluster) patch.cluster = cluster;
+  if (status !== guild.status) patch.status = status;
+  if (cd !== (guild.cd || '')) patch.cd = cd;
+  const dirty = Object.keys(patch).length > 0;
+
+  const partnerId = data.allies[guild.id];
+  const partner = data.guilds.find((g) => g.id === partnerId);
+
+  async function save() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await axios.patch(`/api/threat-board/guild/${guild.id}`, patch);
+      await onSaved();
+      flash(patch.name ? `${guild.name} is now ${patch.name}.` : `${guild.name} updated.`);
+      onClose();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Failed to save.');
+      setSaving(false);
+    }
+  }
+
+  const field = 'w-full bg-hall border border-line rounded-lg px-3 py-2 text-sm text-bone focus:outline-none focus:border-brass';
+
+  return (
+    <Modal onClose={onClose} maxWidth="max-w-md">
+      <h2 className="font-display text-lg text-bone mb-1">Edit guild</h2>
+      <p className="text-ash text-xs mb-5">
+        {guild.cluster}
+        {partner && <> · allied with <span className="text-bone">{partner.name}</span></>}
+      </p>
+
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="tb-name" className="eyebrow text-[10px] text-ash block mb-1.5">Name</label>
+          <input id="tb-name" value={name} onChange={(e) => setName(e.target.value)} className={field}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+          {patch.name && (
+            <p className="text-[11px] text-ash mt-1.5">
+              Renaming carries the alliance with it — no bond is lost.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="tb-status" className="eyebrow text-[10px] text-ash block mb-1.5">Threat rating</label>
+          <select id="tb-status" value={status} onChange={(e) => setStatus(e.target.value)} className={field}>
+            {(data.statuses || STATUSES.map((s) => s.key)).map((s) => (
+              <option key={s} value={s}>{META[s]?.short || s}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="tb-cluster" className="eyebrow text-[10px] text-ash block mb-1.5">Server cluster</label>
+          <select id="tb-cluster" value={cluster} onChange={(e) => setCluster(e.target.value)} className={field}>
+            {data.clusters.map((c) => <option key={c.label} value={c.label}>{c.label}</option>)}
+          </select>
+          {patch.cluster && (
+            <p className="text-[11px] text-ash mt-1.5">
+              Moves to {patch.cluster}. A cross-cluster alliance still shows on both columns.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="tb-cd" className="eyebrow text-[10px] text-ash block mb-1.5">Server transfer cooldown</label>
+          <select id="tb-cd" value={cd} onChange={(e) => setCd(e.target.value)} className={field}>
+            <option value="">— not recorded —</option>
+            {(data.cds || ['30 Days', '15 Days', 'No CD']).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {error && <p className="text-oxblood text-sm mt-4">{error}</p>}
+
+      <div className="flex justify-end gap-2 mt-6">
+        <Button variant="neutral" size="sm" onClick={onClose}>Cancel</Button>
+        <Button size="sm" onClick={save} disabled={!dirty || saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -167,10 +282,13 @@ export default function ThreatBoard() {
   const [view, setView] = useState('board');
   const [hideDead, setHideDead] = useState(true);
   const [picking, setPicking] = useState(null);
+  const [editing, setEditing] = useState(null);
 
   // The server's answer, not a local guess: it is the one that also decides
-  // whether the write endpoints will accept anything.
-  const canEdit = !!data?.canEdit;
+  // whether the write endpoints will accept anything. `stale` means the board
+  // is being served from the shipped seed because the table is empty or the
+  // database is unreachable — readable, but nothing on it can be saved.
+  const canEdit = !!data?.canEdit && !data?.stale;
 
   const load = useCallback(async () => {
     try {
@@ -196,7 +314,14 @@ export default function ThreatBoard() {
   }, [picking]);
 
   const allies = data?.allies || {};
-  const partnerOf = useCallback((name) => allies[name] || null, [allies]);
+  const partnerOf = useCallback((id) => allies[id] || null, [allies]);
+  // Ids are what the data is keyed by; names are what people read. These two
+  // are the only bridge between them, so the rest of the page stays on ids.
+  const nameOf = useCallback(
+    (id) => data?.guilds.find((g) => g.id === id)?.name || null,
+    [data],
+  );
+  const partnerName = useCallback((id) => nameOf(partnerOf(id)), [nameOf, partnerOf]);
 
   const pairCount = useMemo(() => Object.keys(allies).length / 2, [allies]);
 
@@ -213,28 +338,35 @@ export default function ThreatBoard() {
     });
   }, [data, q, cluster, hideDead]);
 
-  async function pick(name) {
-    if (!picking) { setPicking(name); return; }
-    if (picking === name) { setPicking(null); return; }
-    const a = picking;
+  // `picking` holds the guild itself, not an id, so the bar can name it and the
+  // chips can compare identity without a second lookup.
+  async function pick(guild) {
+    if (!picking) { setPicking(guild); return; }
+    if (picking.id === guild.id) { setPicking(null); return; }
+    const first = picking;
     setPicking(null);
     try {
-      const res = await axios.post('/api/threat-board/ally', { a, b: name });
+      const res = await axios.post('/api/threat-board/ally', { a: first.id, b: guild.id });
       await load();
+      // The server answers with the names it freed, since ids mean nothing to
+      // whoever is reading the message.
       const freed = res.data.freed || [];
-      flash(freed.length
-        ? `${a} and ${name} are allied. Released ${freed.join(' and ')}.`
-        : `${a} and ${name} are allied.`);
+      const names = freed.map((id) => nameOf(id)).filter(Boolean);
+      flash(names.length
+        ? `${first.name} and ${guild.name} are allied. Released ${names.join(' and ')}.`
+        : `${first.name} and ${guild.name} are allied.`);
     } catch (e) {
       flash(e.response?.data?.error || 'Failed to save the alliance.', false);
     }
   }
 
-  async function breakAlly(name) {
+  async function breakAlly(guild) {
     try {
-      const res = await axios.delete(`/api/threat-board/ally/${encodeURIComponent(name)}`);
+      const res = await axios.delete(`/api/threat-board/ally/${guild.id}`);
       await load();
-      flash(res.data.partner ? `${name} and ${res.data.partner} are no longer allied.` : 'No alliance to break.');
+      flash(res.data.partner
+        ? `${guild.name} and ${res.data.partner} are no longer allied.`
+        : 'No alliance to break.');
     } catch (e) {
       flash(e.response?.data?.error || 'Failed to break the alliance.', false);
     }
@@ -307,6 +439,12 @@ export default function ThreatBoard() {
         <span className="ml-auto text-xs text-ash tabular-nums">{visible.length} of {data.guilds.length}</span>
       </div>
 
+      {data.stale && (
+        <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
+          Showing the board as last imported — live data is unavailable, so editing is off.
+        </div>
+      )}
+
       {msg && (
         <div className={`mb-3 text-sm ${msg.ok ? 'text-brassbright' : 'text-oxblood'}`}>{msg.text}</div>
       )}
@@ -318,7 +456,7 @@ export default function ThreatBoard() {
           {picking ? (
             <>
               <Link2 className="w-3.5 h-3.5 text-brass" />
-              <span>Pairing <strong className="text-bone">{picking}</strong> — click its ally.</span>
+              <span>Pairing <strong className="text-bone">{picking.name}</strong> — click its ally.</span>
               <Button variant="ghost" size="none" className="text-xs" onClick={() => setPicking(null)}>Cancel (Esc)</Button>
             </>
           ) : (
@@ -356,18 +494,18 @@ export default function ThreatBoard() {
                     {mine.length === 0 && <div className="px-2 py-4 text-xs text-ash italic">No guilds match.</div>}
                     {mine.map((unit) => (
                       unit.length === 2 ? (
-                        <div key={unit[0].name} className="flex flex-col gap-px border-l-2 border-bone rounded-l-sm pl-0.5">
+                        <div key={unit[0].id} className="flex flex-col gap-px border-l-2 border-bone rounded-l-sm pl-0.5">
                           {unit.map((g) => (
                             <GuildChip
-                              key={g.name} guild={g} partner={null}
-                              picking={picking === g.name} canEdit={canEdit} onPick={pick}
+                              key={g.id} guild={g} partner={null}
+                              picking={picking === g.id} canEdit={canEdit} onPick={pick} onEdit={setEditing}
                             />
                           ))}
                         </div>
                       ) : (
                         <GuildChip
-                          key={unit[0].name} guild={unit[0]} partner={partnerOf(unit[0].name)}
-                          picking={picking === unit[0].name} canEdit={canEdit} onPick={pick}
+                          key={unit[0].id} guild={unit[0]} partner={partnerName(unit[0].id)}
+                          picking={picking === unit[0].id} canEdit={canEdit} onPick={pick} onEdit={setEditing}
                         />
                       )
                     ))}
@@ -402,8 +540,16 @@ export default function ThreatBoard() {
         <a href={data.source} target="_blank" rel="noopener noreferrer" className="text-brass hover:text-brassbright">
           community threat spreadsheet
         </a>{' '}
-        (last refreshed {data.importedAt}). The alliance map is maintained by Guild Hall staff.
+        (seeded {data.importedAt}) and maintained since by Guild Hall staff.
       </p>
+
+      {editing && (
+        <GuildEditor
+          guild={editing} data={data} flash={flash}
+          onClose={() => setEditing(null)}
+          onSaved={load}
+        />
+      )}
     </PageShell>
     </PublicShell>
   );
@@ -413,13 +559,13 @@ export default function ThreatBoard() {
 // alongside whom", and where a Threat bonded to another Threat stands out.
 function AllianceList({ data, allies, q, cluster, canEdit, onBreak }) {
   const rows = useMemo(() => {
-    const byName = new Map(data.guilds.map((g) => [g.name, g]));
+    const byId = new Map(data.guilds.map((g) => [g.id, g]));
     const seen = new Set();
     const out = [];
     for (const [a, b] of Object.entries(allies)) {
       if (seen.has(a) || seen.has(b)) continue;
       seen.add(a); seen.add(b);
-      const ga = byName.get(a); const gb = byName.get(b);
+      const ga = byId.get(a); const gb = byId.get(b);
       if (!ga || !gb) continue;
       out.push(RANK[ga.status] <= RANK[gb.status] ? [ga, gb] : [gb, ga]);
     }
@@ -460,7 +606,7 @@ function AllianceList({ data, allies, q, cluster, canEdit, onBreak }) {
         </thead>
         <tbody>
           {rows.map(([a, b]) => (
-            <tr key={a.name} className="border-b border-line/60 hover:bg-panelup transition-colors">
+            <tr key={a.id} className="border-b border-line/60 hover:bg-panelup transition-colors">
               <td className="p-4 text-bone">
                 {a.name}{a.king && <Crown className="w-3 h-3 inline ml-1 text-brass" />}
               </td>
@@ -481,7 +627,7 @@ function AllianceList({ data, allies, q, cluster, canEdit, onBreak }) {
               {canEdit && (
                 <td className="p-4">
                   <button
-                    type="button" onClick={() => onBreak(a.name)}
+                    type="button" onClick={() => onBreak(a)}
                     title={`Break the alliance between ${a.name} and ${b.name}`}
                     aria-label={`Break the alliance between ${a.name} and ${b.name}`}
                     className="text-ash hover:text-oxblood transition-colors"
