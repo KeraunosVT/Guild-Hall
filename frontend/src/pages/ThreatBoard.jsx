@@ -2,16 +2,22 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { Search, Link2, Link2Off, Crown } from 'lucide-react';
 import { useAuth } from '../auth';
+import Sigil from '../components/Sigil';
 import { PageShell } from '../components/ui/PageShell';
 import EmptyState from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
 import Tabs from '../components/ui/Tabs';
 import { useFlash } from '../components/ui/useFlash';
 
-// The Americas threat board — the wider server, not this house. The guild list
-// and threat ratings come from the community spreadsheet and ship as static
-// data (shared/threatBoard.json); the alliance map on top of them is this
-// guild's own reading, stored per-tenant.
+// The Americas threat board — a PUBLIC page, belonging to no guild. It renders
+// outside Gate and outside Layout (see App.jsx), which is why it carries its own
+// page chrome below instead of inheriting the sidebar: a visitor with no session
+// has no house for a sidebar to describe.
+//
+// The guild list and threat ratings come from the community spreadsheet and ship
+// as static data (shared/threatBoard.json). The alliance map on top of them is
+// shared too — one map for everyone, not per-guild — so anyone may read it and
+// only an officer holding the 'threat' capability may change it.
 //
 // TWO AXES, TWO VISUAL CHANNELS. Threat rating owns colour, because there are
 // six ratings and colour is the only channel that separates six things at a
@@ -121,8 +127,35 @@ function GuildChip({ guild, partner, picking, canEdit, onPick }) {
   );
 }
 
+// Page chrome for a page with no guild behind it. Deliberately thin: a
+// wordmark home, and a way in for whoever turns out to be an officer.
+function PublicShell({ children }) {
+  const { user, login } = useAuth();
+  return (
+    <div className="min-h-screen bg-ink text-bone flex flex-col">
+      <header className="border-b border-line flex items-center gap-3 px-6 h-14 shrink-0">
+        <a href="/" className="flex items-center gap-3 text-bone hover:text-brassbright transition-colors">
+          <Sigil className="w-6 h-8 text-brass shrink-0" />
+          <span className="font-display text-sm tracking-[0.18em]">GUILD HALL</span>
+        </a>
+        <span className="text-line">/</span>
+        <span className="eyebrow text-[10px] text-ash">Americas Threat Board</span>
+        <div className="ml-auto">
+          {user
+            ? <a href="/" className="text-sm text-ash hover:text-brassbright transition-colors">Open the hall →</a>
+            : (
+              <button onClick={login} className="text-sm text-ash hover:text-brassbright transition-colors">
+                Sign in
+              </button>
+            )}
+        </div>
+      </header>
+      <main className="flex-1">{children}</main>
+    </div>
+  );
+}
+
 export default function ThreatBoard() {
-  const { can } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -134,7 +167,9 @@ export default function ThreatBoard() {
   const [hideDead, setHideDead] = useState(true);
   const [picking, setPicking] = useState(null);
 
-  const canEdit = can('threat') && !!data?.canEdit;
+  // The server's answer, not a local guess: it is the one that also decides
+  // whether the write endpoints will accept anything.
+  const canEdit = !!data?.canEdit;
 
   const load = useCallback(async () => {
     try {
@@ -204,13 +239,18 @@ export default function ThreatBoard() {
     }
   }
 
-  if (loading) return <PageShell maxWidth="max-w-[1600px]"><EmptyState>Reading the board…</EmptyState></PageShell>;
-  if (error) return <PageShell maxWidth="max-w-[1600px]"><EmptyState>{error}</EmptyState></PageShell>;
+  if (loading) {
+    return <PublicShell><PageShell maxWidth="max-w-[1600px]"><EmptyState>Reading the board…</EmptyState></PageShell></PublicShell>;
+  }
+  if (error) {
+    return <PublicShell><PageShell maxWidth="max-w-[1600px]"><EmptyState>{error}</EmptyState></PageShell></PublicShell>;
+  }
 
   const totals = {};
   for (const g of data.guilds) totals[g.status] = (totals[g.status] || 0) + 1;
 
   return (
+    <PublicShell>
     <PageShell maxWidth="max-w-[1600px]">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
@@ -361,9 +401,10 @@ export default function ThreatBoard() {
         <a href={data.source} target="_blank" rel="noopener noreferrer" className="text-brass hover:text-brassbright">
           community threat spreadsheet
         </a>{' '}
-        (last refreshed {data.importedAt}); alliances are this house's own.
+        (last refreshed {data.importedAt}). The alliance map is maintained by guild officers.
       </p>
     </PageShell>
+    </PublicShell>
   );
 }
 

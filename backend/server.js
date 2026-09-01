@@ -12,7 +12,7 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const {
-  router: authRouter, requireAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
+  router: authRouter, requireAuth, optionalAuth, requireAdminArea, requirePermission, userHas, hasValidSession,
   applyGuildAccess,
 } = require('./auth');
 const { listMembers, listRoles } = require('./discord');
@@ -240,6 +240,56 @@ app.post('/api/early-access', earlyAccessLimiter, async (req, res) => {
   } catch (err) {
     console.error('Early-access webhook failed:', err.message);
     return res.status(502).json({ error: 'Could not submit right now — please try again later.' });
+  }
+});
+
+// ── THREAT BOARD (public) ────────────────────────────────────────────────────
+// The wider Americas server, not any one house. Deliberately mounted ABOVE the
+// /api login wall, and it must stay there: the page is public, linkable, and
+// belongs to no guild, so reading it takes no session and sends no x-guild-id.
+// Moving these below the gate would silently make the page members-only.
+//
+// The guild list and threat ratings are a static import identical for everyone.
+// The alliance map is shared too — one map, global rather than guild-scoped
+// (see GLOBAL_TABLES in tenantDb.js) — so writing it is what needs a gate:
+// requireAuth first, then the 'threat' capability. Note the consequence, which
+// is unusual for this backend: an officer holding 'threat' edits what every
+// other house sees, which is why the actor is recorded on each change.
+const canEditThreat = [requireAuth, (req, res, next) => (userHas(req.user, 'threat')
+  ? next()
+  : res.status(403).json({ error: 'You do not have permission to edit the threat board.' }))];
+
+// Who to blame for a change, for the updated_by column. Not a security control
+// — the capability check above is — just a legible record on a shared map.
+const actorOf = (req) => (req.user ? `${req.user.username || 'unknown'} (${req.user.id})` : null);
+
+app.get('/api/threat-board', optionalAuth, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  // optionalAuth rather than requireAuth: an anonymous visitor gets the board,
+  // just without the editing affordances.
+  res.json({
+    ...threatBoard.board,
+    allies: await threatBoard.allies(),
+    canEdit: userHas(req.user, 'threat'),
+  });
+});
+
+app.post('/api/threat-board/ally', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  const { a, b } = req.body || {};
+  try {
+    res.json(await threatBoard.setAlly(a, b, actorOf(req)));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to save the alliance.' });
+  }
+});
+
+app.delete('/api/threat-board/ally/:name', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  try {
+    res.json(await threatBoard.clearAlly(req.params.name));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to break the alliance.' });
   }
 });
 
@@ -545,56 +595,6 @@ app.get('/api/elite-timers', async (req, res) => {
   if (!eliteTimers) return res.status(503).json({ error: 'Database not configured.' });
   const timers = await eliteTimers.all(req.guildId);
   res.json({ timers, locations: eliteTimers.locations });
-});
-
-// ── THREAT BOARD ─────────────────────────────────────────────────────────────
-// The wider Americas server, not this house: the guild list and threat ratings
-// are a static import from the community spreadsheet, identical for every
-// tenant. Only the alliance map is guild data, and it is scoped like anything
-// else.
-//
-// Reading is open to any member — knowing who is dangerous is why the page
-// exists. Writing takes the 'threat' capability, because an alliance map the
-// whole guild plans around should not be something any one member can redraw.
-// Gated inline rather than under /api/admin, since the page is a member page
-// with officer controls on it, the same shape as /loa and /signups.
-const canEditThreat = (req, res, next) => (userHas(req.user, 'threat')
-  ? next()
-  : res.status(403).json({ error: 'You do not have permission to edit the threat board.' }));
-
-app.get('/api/threat-board', async (req, res) => {
-  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
-  const marks = await threatBoard.marks(req.guildId);
-  res.json({ ...threatBoard.board, ...marks, canEdit: userHas(req.user, 'threat') });
-});
-
-app.post('/api/threat-board/ally', canEditThreat, async (req, res) => {
-  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
-  const { a, b } = req.body || {};
-  try {
-    res.json(await threatBoard.setAlly(req.guildId, a, b));
-  } catch (e) {
-    res.status(400).json({ error: e.message || 'Failed to save the alliance.' });
-  }
-});
-
-app.delete('/api/threat-board/ally/:name', canEditThreat, async (req, res) => {
-  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
-  try {
-    res.json(await threatBoard.clearAlly(req.guildId, req.params.name));
-  } catch (e) {
-    res.status(400).json({ error: e.message || 'Failed to break the alliance.' });
-  }
-});
-
-app.delete('/api/threat-board/marks', canEditThreat, async (req, res) => {
-  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
-  try {
-    await threatBoard.clearAll(req.guildId);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message || 'Failed to clear the board.' });
-  }
 });
 
 // Per-map win/loss record, for the War Record page.

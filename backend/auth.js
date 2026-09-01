@@ -505,6 +505,28 @@ async function requireAuth(req, res, next) {
   next();
 }
 
+// Populate req.user IF the caller happens to be signed in, and carry on either
+// way. For public routes that show more to a member than to a visitor — the
+// threat board's editing controls being the first — where requireAuth's 401
+// would be wrong and hasValidSession alone is not enough, since it verifies the
+// token without ever telling you who it belongs to.
+//
+// Deliberately skips the re-verify that requireAuth does: a page anyone can read
+// should not be making Discord calls on behalf of a visitor who only came to
+// look. A revoked member keeps the editing controls on screen until their token
+// expires, and every write they attempt still fails at requireAuth.
+function optionalAuth(req, res, next) {
+  if (req.user) return next();
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!authConfigured || !token) return next();
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+  } catch {
+    // An expired or forged cookie reads exactly like no cookie here.
+  }
+  next();
+}
+
 // Re-check every guild in the session against Discord. Returns a fresh session,
 // REVOKED when the user has lost access everywhere, or null to leave the
 // session alone (Discord unreachable — our outage, not their revocation).
@@ -607,6 +629,6 @@ function hasValidSession(req) {
 }
 
 module.exports = {
-  router, requireAuth, requireAdmin, requireAdminArea, requirePermission, userHas,
+  router, requireAuth, optionalAuth, requireAdmin, requireAdminArea, requirePermission, userHas,
   hasValidSession, applyGuildAccess,
 };

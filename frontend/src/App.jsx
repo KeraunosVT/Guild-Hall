@@ -106,75 +106,76 @@ function GuildGate({ children }) {
   return children;
 }
 
-// Full login wall: nothing past the gate renders without a valid session.
+// Full login wall. A pathless layout route, so everything nested under it is
+// gated and everything declared outside it is not — the router itself now sits
+// above this, which is what lets a public route exist at all.
 function Gate() {
   const { user, loading } = useAuth();
   if (loading) return <Splash />;
   if (!user) return <Login />;
-
-  return (
-    <GuildGate>
-    <Router>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/war-record" element={<MatchStats />} />
-          <Route path="/roster" element={<Roster />} />
-          <Route path="/roster/:name" element={<PlayerProfile />} />
-          <Route path="/me" element={<MyProfile />} />
-          <Route path="/shards" element={<Shards />} />
-          <Route path="/loot" element={<Loot />} />
-          <Route path="/loa" element={<LOA />} />
-          {/* Member page with officer controls gated inline, same as /loa —
-              not under /admin, because signing up is something everyone does. */}
-          <Route path="/signups" element={<Signups />} />
-          {/* The member's own attendance and the late-request button. The
-              officer surface is /admin/attendance — a different page, because
-              taking attendance and asking about it are different jobs. */}
-          <Route path="/attendance" element={<MyAttendance />} />
-          {/* The week ahead. Declared before /attendance/:id for readability —
-              React Router ranks a static segment above a dynamic one either
-              way, so "calendar" is never read as an event id. */}
-          <Route path="/attendance/calendar" element={<EventCalendar />} />
-          {/* One logged night, in full. Member-visible with officer controls
-              inline — reading the record is not an officer action, and this is
-              where a member notices they are missing from it. */}
-          <Route path="/attendance/:id" element={<EventAttendance />} />
-          {/* The wider Americas server rather than this house: the guild list
-              and threat ratings are the same for every tenant, and only the
-              alliance map layered on them is guild data. Sits outside the
-              guild-scoped sections of the nav for that reason. */}
-          <Route path="/threat-board" element={<ThreatBoard />} />
-          <Route path="/classes" element={<Classes />} />
-          <Route path="/gear" element={<GearLevel />} />
-          <Route path="/admin" element={<Admin />} />
-          <Route path="/admin/parties" element={<Parties />} />
-          <Route path="/admin/names" element={<Names />} />
-          <Route path="/admin/loot" element={<LootTally />} />
-          <Route path="/admin/loot/items" element={<LootItems />} />
-          <Route path="/admin/loot/currency" element={<LootCurrency />} />
-          <Route path="/admin/loot/requests" element={<LootRequests />} />
-          <Route path="/admin/loot/history" element={<LootHistory />} />
-          <Route path="/admin/attendance" element={<Attendance />} />
-          <Route path="/admin/gear-levels" element={<GearLevels />} />
-          <Route path="/admin/permissions" element={<Permissions />} />
-          <Route path="/admin/audit-log" element={<AuditLog />} />
-          <Route path="/admin/settings" element={<GuildSettings />} />
-          {/* Legacy aliases kept so old links still resolve */}
-          <Route path="/dashboard" element={<MatchStats />} />
-          <Route path="/match-stats" element={<MatchStats />} />
-        </Route>
-      </Routes>
-    </Router>
-    </GuildGate>
-  );
+  return <GuildGate><Outlet /></GuildGate>;
 }
 
 function App() {
   return (
     <AuthProvider>
       <GuildProvider>
-        <Gate />
+        <Router>
+          <Routes>
+            {/* PUBLIC — outside Gate, so no session is required, and outside
+                GuildGate, so no guild is resolved for it. The threat board
+                describes the whole Americas server and belongs to no house; it
+                is linkable by anyone. Keep it declared here rather than nesting
+                it below, or it silently becomes members-only. */}
+            <Route path="/threat-board" element={<ThreatBoard />} />
+
+            <Route element={<Gate />}>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Home />} />
+                <Route path="/war-record" element={<MatchStats />} />
+                <Route path="/roster" element={<Roster />} />
+                <Route path="/roster/:name" element={<PlayerProfile />} />
+                <Route path="/me" element={<MyProfile />} />
+                <Route path="/shards" element={<Shards />} />
+                <Route path="/loot" element={<Loot />} />
+                <Route path="/loa" element={<LOA />} />
+                {/* Member page with officer controls gated inline, same as /loa —
+                    not under /admin, because signing up is something everyone does. */}
+                <Route path="/signups" element={<Signups />} />
+                {/* The member's own attendance and the late-request button. The
+                    officer surface is /admin/attendance — a different page, because
+                    taking attendance and asking about it are different jobs. */}
+                <Route path="/attendance" element={<MyAttendance />} />
+                {/* The week ahead. Declared before /attendance/:id for readability —
+                    React Router ranks a static segment above a dynamic one either
+                    way, so "calendar" is never read as an event id. */}
+                <Route path="/attendance/calendar" element={<EventCalendar />} />
+                {/* One logged night, in full. Member-visible with officer controls
+                    inline — reading the record is not an officer action, and this is
+                    where a member notices they are missing from it. */}
+                <Route path="/attendance/:id" element={<EventAttendance />} />
+                <Route path="/classes" element={<Classes />} />
+                <Route path="/gear" element={<GearLevel />} />
+                <Route path="/admin" element={<Admin />} />
+                <Route path="/admin/parties" element={<Parties />} />
+                <Route path="/admin/names" element={<Names />} />
+                <Route path="/admin/loot" element={<LootTally />} />
+                <Route path="/admin/loot/items" element={<LootItems />} />
+                <Route path="/admin/loot/currency" element={<LootCurrency />} />
+                <Route path="/admin/loot/requests" element={<LootRequests />} />
+                <Route path="/admin/loot/history" element={<LootHistory />} />
+                <Route path="/admin/attendance" element={<Attendance />} />
+                <Route path="/admin/gear-levels" element={<GearLevels />} />
+                <Route path="/admin/permissions" element={<Permissions />} />
+                <Route path="/admin/audit-log" element={<AuditLog />} />
+                <Route path="/admin/settings" element={<GuildSettings />} />
+                {/* Legacy aliases kept so old links still resolve */}
+                <Route path="/dashboard" element={<MatchStats />} />
+                <Route path="/match-stats" element={<MatchStats />} />
+              </Route>
+            </Route>
+          </Routes>
+        </Router>
       </GuildProvider>
     </AuthProvider>
   );
