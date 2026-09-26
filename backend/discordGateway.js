@@ -310,7 +310,13 @@ async function handleInteraction(interaction) {
   }
 
   if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
-  if (interaction.isButton()) return handleButton(interaction);
+  // Buttons are namespaced by customId prefix so each family owns its own
+  // handler: 'signup:' signups, 'et:' elite timers. Both run only after the
+  // tenant is resolved above — a button carries no guild of its own.
+  if (interaction.isButton()) {
+    if (String(interaction.customId || '').startsWith('et:')) return handleEliteButton(interaction);
+    return handleButton(interaction);
+  }
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === 'elitetimer') return handleReport(interaction);
   if (interaction.commandName === 'elitetimers') return handleList(interaction);
@@ -353,6 +359,59 @@ async function handleReport(interaction) {
   }
 }
 
+// ── THE TIMER BOARD ─────────────────────────────────────────────────────────
+// One renderer shared by /elitetimers and every button that changes something,
+// so the board can never disagree with itself depending on how it was drawn.
+// Scoped to one guild: the board a server sees is only ever its own timers.
+//
+// Relative timestamps (<t:…:R>) are rendered live by Discord, so a board left
+// in a channel keeps counting down on its own — the Refresh button is only for
+// the parts that are text ("spawn window open" vs "spawns in"), and for picking
+// up a report someone made with the command instead of a button.
+async function eliteBoard(guildId) {
+  const rows = await eliteTimers.all(guildId);
+  const byLocation = Object.fromEntries(rows.map((r) => [r.location, r]));
+  const now = Date.now();
+
+  const lines = eliteTimers.locations.map((loc) => {
+    const row = byLocation[loc];
+    if (!row) return `**${loc}** — no report yet`;
+    const spawnUnix = Math.floor(new Date(row.next_spawn_at).getTime() / 1000);
+    if (new Date(row.next_spawn_at).getTime() > now) {
+      return `**${loc}** — spawns <t:${spawnUnix}:R> (<t:${spawnUnix}:t>)`;
+    }
+    return `**${loc}** — spawn window open (last reported <t:${spawnUnix}:R>)`;
+  });
+
+  return {
+    content: `${lines.join('\n')}\n\n-# Tap a boss to report it killed **just now**. Use \`/elitetimer\` for a kill that happened earlier.`,
+    components: eliteButtons(byLocation, now),
+  };
+}
+
+// A button per location, five to a row (Discord's limit), plus Refresh.
+//
+// Success styling for a boss whose window is open — the one you are most
+// likely to be reporting — and Secondary for one still on cooldown, so a
+// mistaken tap is visually distinct before you make it rather than after.
+function eliteButtons(byLocation, now) {
+  const buttons = eliteTimers.locations.map((loc) => {
+    const row = byLocation[loc];
+    const due = !row || new Date(row.next_spawn_at).getTime() <= now;
+    return new ButtonBuilder()
+      .setCustomId(`et:kill:${loc}`)
+      .setLabel(loc)
+      .setStyle(due ? ButtonStyle.Success : ButtonStyle.Secondary);
+  });
+  buttons.push(new ButtonBuilder().setCustomId('et:refresh').setLabel('↻').setStyle(ButtonStyle.Secondary));
+
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+  }
+  return rows;
+}
+
 async function handleList(interaction) {
   await interaction.deferReply();
 
@@ -361,23 +420,109 @@ async function handleList(interaction) {
   }
 
   try {
-    const rows = await eliteTimers.all(interaction.guildHall.id);
-    const byLocation = Object.fromEntries(rows.map((r) => [r.location, r]));
-    const now = Date.now();
-    const lines = eliteTimers.locations.map((loc) => {
-      const row = byLocation[loc];
-      if (!row) return `**${loc}** — no report yet`;
-      const spawnUnix = Math.floor(new Date(row.next_spawn_at).getTime() / 1000);
-      if (new Date(row.next_spawn_at).getTime() > now) {
-        return `**${loc}** — spawns <t:${spawnUnix}:R> (<t:${spawnUnix}:t>)`;
-      }
-      return `**${loc}** — spawn window open (last reported <t:${spawnUnix}:R>)`;
-    });
-    await interaction.editReply(lines.join('\n'));
+    await interaction.editReply(await eliteBoard(interaction.guildHall.id));
   } catch (err) {
     console.error('elitetimers command error:', err.message);
     await interaction.editReply('Something went wrong reading the timers.');
   }
+}
+
+// ── ELITE TIMER BUTTONS ─────────────────────────────────────────────────────
+// customId carries everything needed to act, so a board posted last week still
+// works after a redeploy. No collector, for the same reason the signup buttons
+// don't use one: collectors live in memory and die with the process, which
+// would silently kill every board already in the channel.
+//
+//   et:kill:<location>              tap a boss on the board
+//   et:refresh                      redraw the board
+//   et:force:<messageId>:<location> confirm an overwrite (see below)
+//
+// None of these carry a guild. Which guild's timer is written comes from
+// interaction.guildHall, resolved from the server the click happened in, so a
+// board can only ever report into the guild that is looking at it.
+//
+// The confirm step exists because reporting is destructive and a button is much
+// easier to misclick than a typed command: it overwrites the stored timer and
+// the previous kill time is gone. Tapping a boss that is ALREADY due needs no
+// confirmation — there is nothing useful to lose. Tapping one still on cooldown
+// asks first, because that is either a genuine early kill or a fat finger, and
+// only the person tapping knows which.
+async function handleEliteButton(interaction) {
+  if (!eliteTimers) {
+    return interaction.reply({ content: 'Elite timers are not configured right now.', flags: MessageFlags.Ephemeral });
+  }
+
+  const guildId = interaction.guildHall.id;
+  const [, action, ...rest] = interaction.customId.split(':');
+
+  try {
+    if (action === 'refresh') {
+      return await interaction.update(await eliteBoard(guildId));
+    }
+
+    if (action === 'kill') {
+      // Location names may contain anything but were split on ':', so rejoin.
+      const location = rest.join(':');
+      if (!eliteTimers.locations.includes(location)) {
+        return await interaction.reply({ content: `"${location}" isn't a tracked location any more.`, flags: MessageFlags.Ephemeral });
+      }
+
+      const existing = (await eliteTimers.all(guildId)).find((r) => r.location === location);
+      const nextSpawn = existing ? new Date(existing.next_spawn_at).getTime() : 0;
+      if (nextSpawn > Date.now()) {
+        const spawnUnix = Math.floor(nextSpawn / 1000);
+        return await interaction.reply({
+          content: `**${location}** isn't due until <t:${spawnUnix}:t> (<t:${spawnUnix}:R>). Report it killed just now anyway?`,
+          flags: MessageFlags.Ephemeral,
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`et:force:${interaction.message.id}:${location}`)
+              .setLabel('Yes, killed just now').setStyle(ButtonStyle.Danger),
+          )],
+        });
+      }
+
+      // The button is ON the board, so updating this interaction redraws it —
+      // one atomic edit, no message id needed.
+      const confirmation = await reportElite(interaction, location);
+      await interaction.update(await eliteBoard(guildId));
+      await interaction.followUp({ content: confirmation, flags: MessageFlags.Ephemeral });
+      return undefined;
+    }
+
+    if (action === 'force') {
+      const [messageId, ...locParts] = rest;
+      const location = locParts.join(':');
+      if (!eliteTimers.locations.includes(location)) {
+        return await interaction.update({ content: `"${location}" isn't a tracked location any more.`, components: [] });
+      }
+      const confirmation = await reportElite(interaction, location);
+      // Here the interaction's message is the ephemeral prompt, not the board.
+      // Replacing it removes the confirm button so it can't be pressed twice.
+      await interaction.update({ content: confirmation, components: [] });
+      // The board is a different message, reached by the id the customId
+      // carried. Best-effort: the timer is already saved, and a board that
+      // failed to redraw must not read as a report that failed.
+      const board = await interaction.channel?.messages.fetch(messageId).catch(() => null);
+      if (board) await board.edit(await eliteBoard(guildId)).catch((err) => console.error('elite board redraw failed:', err.message));
+      return undefined;
+    }
+  } catch (err) {
+    console.error('elite timer button error:', err.message);
+    const msg = { content: 'Something went wrong saving that timer.', flags: MessageFlags.Ephemeral };
+    if (interaction.deferred || interaction.replied) await interaction.followUp(msg).catch(() => {});
+    else await interaction.reply(msg).catch(() => {});
+  }
+  return undefined;
+}
+
+// Records the kill at NOW, for this guild, and returns the line telling the
+// tapper what it did. Attribution matches /elitetimer's (the Discord username),
+// so a board report and a typed one are indistinguishable in the record.
+async function reportElite(interaction, location) {
+  const row = await eliteTimers.report(interaction.guildHall.id, location, new Date(), interaction.user.username);
+  const spawnUnix = Math.floor(new Date(row.next_spawn_at).getTime() / 1000);
+  return `**${location}** killed — next spawn <t:${spawnUnix}:t> (<t:${spawnUnix}:R>).`;
 }
 
 // ── /loa ──────────────────────────────────────────────────────────────────
@@ -1423,4 +1568,10 @@ module.exports.__test = {
   // "are officers kept out" but "is one guild's night reachable from another".
   autocompleteLateEvent,
   handleAttendanceLate,
+  // The elite timer board and its buttons. setEliteTimers lets
+  // test/eliteButtons.js stub the data module so the branching (confirm or
+  // not, which message gets edited) can be checked with no database at all.
+  setEliteTimers: (t) => { eliteTimers = t; },
+  eliteBoard,
+  handleEliteButton,
 };

@@ -88,6 +88,9 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
     editReply: async (m) => { replies.push(typeof m === 'string' ? m : JSON.stringify(m)); return {}; },
     reply: async (m) => { replies.push(typeof m === 'string' ? m : (m.content || JSON.stringify(m))); return {}; },
     followUp: async (m) => { replies.push(typeof m === 'string' ? m : (m.content || JSON.stringify(m))); return {}; },
+    // Elite timer buttons edit the message they sit on rather than replying.
+    update: async (m) => { replies.push(typeof m === 'string' ? m : (m.content || JSON.stringify(m))); return {}; },
+    message: { id: 'board-msg' },
     respond: async () => {},
     replies,
   };
@@ -163,6 +166,23 @@ function makeInteraction({ guildId, command, sub, opts = {}, roles = [], user = 
   console.log('\n3. list command');
   i = await run(makeInteraction({ guildId: rowA.discord_guild_id, command: 'elitetimers' }));
   check('list shows this guild Laslan timer', (i.replies[0] || '').includes('Laslan'));
+
+  // The board's buttons carry a location and nothing else, so which guild's
+  // timer they write is decided entirely by tenant resolution. Nyx because
+  // neither fixture has reported it: it is due, so the tap writes without the
+  // confirm step.
+  console.log('\n3b. elite board buttons');
+  i = await run(makeInteraction({ guildId: rowB.discord_guild_id, customId: 'et:kill:Nyx' }));
+  const nyxA = (await rows('elite_timers', rowA.id)).filter((r) => r.location === 'Nyx');
+  const nyxB = (await rows('elite_timers', rowB.id)).filter((r) => r.location === 'Nyx');
+  check('a tap in B writes B\'s timer', nyxB.length === 1, `${nyxB.length} rows · ${i.replies.join(' | ')}`);
+  check('...and not A\'s', nyxA.length === 0, `${nyxA.length} rows`);
+
+  const nyxBefore = ((await s.from('elite_timers').select('guild_id').eq('location', 'Nyx')).data || []).length;
+  i = await run(makeInteraction({ guildId: '600000000000009999', customId: 'et:kill:Nyx' }));
+  const nyxAfter = ((await s.from('elite_timers').select('guild_id').eq('location', 'Nyx')).data || []).length;
+  check('unregistered server cannot press the board', nyxAfter === nyxBefore && /not registered/i.test(i.replies[0] || ''),
+    `${nyxAfter} rows, was ${nyxBefore} · ${i.replies[0] || ''}`);
 
   // ── 4. LOA: announced into the OWN guild's channel, row scoped, id stored ─
   console.log('\n4. /loa event');

@@ -11,6 +11,7 @@
     "test:login": "node test/loginFlow.js",
     "test:signups": "node test/signupSemantics.js",
     "test:late": "node test/lateAttendance.js",
+    "test:elite": "node test/eliteButtons.js",
     "demo": "node scripts/demoServer.js",
     "demo:seed": "node scripts/demoGuild.js",
     "demo:purge": "node scripts/demoGuild.js --purge",

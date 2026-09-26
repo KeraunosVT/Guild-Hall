@@ -11,6 +11,8 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const SUITES = [
   ['leak audit (static)', 'leakAudit.js', false],
+  // Stubbed data module, so it runs without a database too.
+  ['elite timer buttons', 'eliteButtons.js', false],
   ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],

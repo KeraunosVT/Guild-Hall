@@ -30,6 +30,7 @@ One deployment serves **many guilds**. Each Discord server is a tenant row in th
 
 **Discord bot**
 - `/elitetimer`, `/elitetimers` — report and check elite boss respawn timers
+- `/elitetimers` — the respawn board, **with a button per boss**. Tapping one reports it killed *just now* and redraws the board in place; green means the window is open, grey means the timer is still running. Tapping a grey one asks to confirm first, because a report overwrites the stored timer and a button is much easier to misclick than a typed command. `/elitetimer` is still the way to report a kill that happened earlier. The buttons carry everything they need in their `customId`, so a board left in a channel keeps working after a redeploy — and none of them carry a guild: which guild's timer a tap writes comes from the server it was pressed in, resolved before the button is handled
 - `/loa` — submit or cancel leave of absence from Discord
 - `/attendance` — snap the caller's voice channel and log attendance for a scheduled event
 - `/announce` — post a timed announcement (e.g. "get into CTA Comms") with a timestamp that renders in each viewer's own timezone
