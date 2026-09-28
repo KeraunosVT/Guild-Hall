@@ -80,19 +80,30 @@ module.exports = function createThreatBoard(supabase) {
     // not the page — it falls back to the seed the build shipped with.
     async board() {
       try {
-        const [g, c] = await Promise.all([
-          guilds().select('id, name, cluster, status, cd, king').order('name'),
+        const [g, c, a] = await Promise.all([
+          guilds().select('id, name, cluster, status, cd, king, updated_at').order('name'),
           clusters().select('label, servers, position').order('position'),
+          // Only the newest bond is needed, for "last updated".
+          alliances().select('updated_at').order('updated_at', { ascending: false }).limit(1),
         ]);
         if (g.error || c.error) throw new Error(g.error?.message || c.error?.message);
         // An empty table means saas_007 has not been run yet. Serving the seed
         // is better than serving an empty board, and the page still works.
         if (!g.data?.length) return { ...api.seedBoard(), stale: true };
+
+        // When the board last changed: the newest edit to any guild or any
+        // alliance. Breaking an alliance deletes its rows, so that one change
+        // leaves no timestamp behind — the date reflects everything else.
+        const stamps = [...g.data.map((r) => r.updated_at), ...(a.data || []).map((r) => r.updated_at)]
+          .filter(Boolean).map((t) => new Date(t).getTime());
+        const lastUpdated = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
+
         return {
           source: SEED.source,
           importedAt: SEED.importedAt,
+          lastUpdated,
           clusters: c.data.map(({ label, servers }) => ({ label, servers })),
-          guilds: g.data,
+          guilds: g.data.map(({ updated_at: _u, ...rest }) => rest),
         };
       } catch (e) {
         console.error('threatBoard.board falling back to seed:', e.message);
@@ -112,6 +123,8 @@ module.exports = function createThreatBoard(supabase) {
       return {
         source: SEED.source,
         importedAt: SEED.importedAt,
+        // The seed is as current as its import.
+        lastUpdated: SEED.importedAt ? new Date(SEED.importedAt).toISOString() : null,
         clusters: SEED.clusters.map(({ label, servers }) => ({ label, servers })),
         guilds: SEED.guilds.map((g) => ({ ...g, id: `seed:${g.cluster}:${g.name}` })),
       };

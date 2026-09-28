@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
-import { Search, Link2, Link2Off, Crown, Pencil, Plus } from 'lucide-react';
+import { Search, Link2, Link2Off, Crown, Pencil, Plus, Clock, MessageSquare } from 'lucide-react';
 import { useAuth } from '../auth';
 import Sigil from '../components/Sigil';
 import { PageShell } from '../components/ui/PageShell';
@@ -32,6 +32,23 @@ import { STATUSES } from '../threatStatus';
 const RANK = Object.fromEntries(STATUSES.map((s, i) => [s.key, i]));
 const META = Object.fromEntries(STATUSES.map((s) => [s.key, s]));
 const DEAD = 'Disbanded/Merged';
+
+// Where players send corrections for their own server. The board is kept by
+// Guild Hall staff, so a rating that's out of date is fixed by telling them.
+const DISCORD_INVITE = 'https://discord.gg/vUngpRQBFe';
+
+// "3 days ago" — how stale the board is matters more at a glance than the date.
+function timeAgo(iso) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 60) return `${days} day${days === 1 ? '' : 's'} ago`;
+  const months = Math.round(days / 30);
+  return `${months} months ago`;
+}
 
 // Strongest first, cluster leaders above everything.
 const byStrength = (a, b) => (b.king ? 1 : 0) - (a.king ? 1 : 0)
@@ -502,6 +519,25 @@ export default function ThreatBoard() {
             Every guild on the five Americas clusters, rated by how much of a fight they put up.
             A guild holds one alliance at a time, so pairing two releases whoever they were bound to.
           </p>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 text-sm">
+            {data.lastUpdated && (
+              <span className="inline-flex items-center gap-1.5 text-ash">
+                <Clock className="w-3.5 h-3.5" />
+                Last updated{' '}
+                <time dateTime={data.lastUpdated} title={new Date(data.lastUpdated).toLocaleString()} className="text-bone">
+                  {new Date(data.lastUpdated).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                </time>
+                <span>({timeAgo(data.lastUpdated)})</span>
+              </span>
+            )}
+            <a
+              href={DISCORD_INVITE} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-brass hover:text-brassbright transition-colors"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Updates for your server? Tell us in the Guild Hall Discord
+            </a>
+          </div>
         </div>
         <div className="text-right">
           <div className="font-mono text-2xl text-brassbright tabular-nums">{pairCount}</div>
