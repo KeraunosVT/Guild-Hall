@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
-import { Search, Link2, Link2Off, Crown, Pencil } from 'lucide-react';
+import { Search, Link2, Link2Off, Crown, Pencil, Plus } from 'lucide-react';
 import { useAuth } from '../auth';
 import Sigil from '../components/Sigil';
 import { PageShell } from '../components/ui/PageShell';
@@ -143,6 +143,7 @@ function GuildEditor({ guild, data, onClose, onSaved, flash }) {
   const [cluster, setCluster] = useState(guild.cluster);
   const [status, setStatus] = useState(guild.status);
   const [cd, setCd] = useState(guild.cd || '');
+  const [king, setKing] = useState(!!guild.king);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -152,7 +153,14 @@ function GuildEditor({ guild, data, onClose, onSaved, flash }) {
   if (cluster !== guild.cluster) patch.cluster = cluster;
   if (status !== guild.status) patch.status = status;
   if (cd !== (guild.cd || '')) patch.cd = cd;
+  // A move always leaves the crown behind (the server drops it), so on a move
+  // the switch means "crown it on the new cluster" and only `true` is sent.
+  const moving = cluster !== guild.cluster;
+  if (moving ? king : king !== !!guild.king) patch.king = king;
   const dirty = Object.keys(patch).length > 0;
+
+  // Whoever holds the cluster this guild will be on, if it isn't this guild.
+  const holder = data.guilds.find((g) => g.cluster === cluster && g.king && g.id !== guild.id);
 
   const partnerId = data.allies[guild.id];
   const partner = data.guilds.find((g) => g.id === partnerId);
@@ -162,9 +170,20 @@ function GuildEditor({ guild, data, onClose, onSaved, flash }) {
     setSaving(true);
     setError(null);
     try {
-      await axios.patch(`/api/threat-board/guild/${guild.id}`, patch);
+      const res = await axios.patch(`/api/threat-board/guild/${guild.id}`, patch);
       await onSaved();
-      flash(patch.name ? `${guild.name} is now ${patch.name}.` : `${guild.name} updated.`);
+      const shown = patch.name || guild.name;
+      if (patch.king === true) {
+        flash(res.data.previousKing
+          ? `${shown} now holds ${cluster}, taking it from ${res.data.previousKing}.`
+          : `${shown} now holds ${cluster}.`);
+      } else if (patch.king === false) {
+        flash(`${shown} no longer holds ${cluster}. The cluster has no crown.`);
+      } else if (res.data.crownDropped) {
+        flash(`${shown} moved to ${cluster} and left the ${guild.cluster} crown behind.`);
+      } else {
+        flash(patch.name ? `${guild.name} is now ${patch.name}.` : `${guild.name} updated.`);
+      }
       onClose();
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to save.');
@@ -205,14 +224,30 @@ function GuildEditor({ guild, data, onClose, onSaved, flash }) {
 
         <div>
           <label htmlFor="tb-cluster" className="eyebrow text-[10px] text-ash block mb-1.5">Server cluster</label>
-          <select id="tb-cluster" value={cluster} onChange={(e) => setCluster(e.target.value)} className={field}>
+          <select id="tb-cluster" value={cluster} onChange={(e) => { setCluster(e.target.value); if (e.target.value !== guild.cluster) setKing(false); else setKing(!!guild.king); }} className={field}>
             {data.clusters.map((c) => <option key={c.label} value={c.label}>{c.label}</option>)}
           </select>
           {patch.cluster && (
             <p className="text-[11px] text-ash mt-1.5">
               Moves to {patch.cluster}. A cross-cluster alliance still shows on both columns.
+              {guild.king && <> It leaves the {guild.cluster} crown behind.</>}
             </p>
           )}
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2.5 text-sm text-bone cursor-pointer select-none">
+            <input type="checkbox" checked={king} onChange={(e) => setKing(e.target.checked)} className="accent-brass" />
+            <Crown className="w-3.5 h-3.5 text-brass" />
+            Holds {cluster}
+          </label>
+          <p className="text-[11px] text-ash mt-1.5">
+            {king && holder && <>Takes the crown from <span className="text-bone">{holder.name}</span>.</>}
+            {king && !holder && !(guild.king && !moving) && <>{cluster} has no crown right now.</>}
+            {!king && guild.king && !moving && <>{cluster} will have no crown until another guild takes it.</>}
+            {!king && !(guild.king && !moving) && holder && <>Held by {holder.name}.</>}
+            {!king && !holder && !guild.king && <>Nobody holds {cluster} right now.</>}
+          </p>
         </div>
 
         <div>
@@ -230,6 +265,85 @@ function GuildEditor({ guild, data, onClose, onSaved, flash }) {
         <Button variant="neutral" size="sm" onClick={onClose}>Cancel</Button>
         <Button size="sm" onClick={save} disabled={!dirty || saving}>
           {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+// A guild the board doesn't have yet. Starts uncrowned and unallied — both are
+// set afterwards like any other guild, from its chip.
+function AddGuild({ data, initialCluster, onClose, onSaved, flash }) {
+  const [name, setName] = useState('');
+  const [cluster, setCluster] = useState(initialCluster || data.clusters[0]?.label || '');
+  const [status, setStatus] = useState('Potential');
+  const [cd, setCd] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const trimmed = name.trim();
+  const clash = data.guilds.find((g) => g.cluster === cluster && g.name.toLowerCase() === trimmed.toLowerCase());
+
+  async function save() {
+    if (!trimmed || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await axios.post('/api/threat-board/guild', { name: trimmed, cluster, status, cd });
+      await onSaved();
+      flash(`${trimmed} added to ${cluster}.`);
+      onClose();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Failed to add the guild.');
+      setSaving(false);
+    }
+  }
+
+  const field = 'w-full bg-hall border border-line rounded-lg px-3 py-2 text-sm text-bone focus:outline-none focus:border-brass';
+
+  return (
+    <Modal onClose={onClose} maxWidth="max-w-md">
+      <h2 className="font-display text-lg text-bone mb-1">Add a guild</h2>
+      <p className="text-ash text-xs mb-5">It joins the board uncrowned and unallied.</p>
+
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="tb-new-name" className="eyebrow text-[10px] text-ash block mb-1.5">Name</label>
+          <input id="tb-new-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} className={field}
+            maxLength={120} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+          {clash && (
+            <p className="text-[11px] text-oxblood mt-1.5">{cluster} already has a guild called {clash.name}.</p>
+          )}
+        </div>
+        <div>
+          <label htmlFor="tb-new-cluster" className="eyebrow text-[10px] text-ash block mb-1.5">Server cluster</label>
+          <select id="tb-new-cluster" value={cluster} onChange={(e) => setCluster(e.target.value)} className={field}>
+            {data.clusters.map((c) => <option key={c.label} value={c.label}>{c.label} — {c.servers}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="tb-new-status" className="eyebrow text-[10px] text-ash block mb-1.5">Threat rating</label>
+          <select id="tb-new-status" value={status} onChange={(e) => setStatus(e.target.value)} className={field}>
+            {(data.statuses || STATUSES.map((s) => s.key)).map((s) => (
+              <option key={s} value={s}>{META[s]?.short || s}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="tb-new-cd" className="eyebrow text-[10px] text-ash block mb-1.5">Server transfer cooldown</label>
+          <select id="tb-new-cd" value={cd} onChange={(e) => setCd(e.target.value)} className={field}>
+            <option value="">— not recorded —</option>
+            {(data.cds || ['30 Days', '15 Days', 'No CD']).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {error && <p className="text-oxblood text-sm mt-4">{error}</p>}
+
+      <div className="flex justify-end gap-2 mt-6">
+        <Button variant="neutral" size="sm" onClick={onClose}>Cancel</Button>
+        <Button size="sm" onClick={save} disabled={!trimmed || !!clash || saving}>
+          {saving ? 'Adding…' : 'Add guild'}
         </Button>
       </div>
     </Modal>
@@ -276,6 +390,8 @@ export default function ThreatBoard() {
   const [hideDead, setHideDead] = useState(true);
   const [picking, setPicking] = useState(null);
   const [editing, setEditing] = useState(null);
+  // null when closed; otherwise the cluster to preselect ('' for none).
+  const [adding, setAdding] = useState(null);
 
   // The server's answer, not a local guess: it is the one that also decides
   // whether the write endpoints will accept anything. `stale` means the board
@@ -455,7 +571,11 @@ export default function ThreatBoard() {
           ) : (
             <>
               <Link2 className="w-3.5 h-3.5" />
-              <span>Click a guild, then click its ally to bond them.</span>
+              <span>Click a guild, then click its ally to bond them. Use the pencil to edit a guild or move its crown.</span>
+              <Button variant="ghost" size="none" className="text-xs ml-auto" icon={<Plus className="w-3.5 h-3.5" />}
+                onClick={() => setAdding(cluster === 'all' ? '' : cluster)}>
+                Add guild
+              </Button>
             </>
           )}
         </div>
@@ -471,7 +591,16 @@ export default function ThreatBoard() {
               return (
                 <section key={c.label} className="panel rounded-lg overflow-hidden">
                   <div className="px-3.5 pt-3.5 pb-3 bg-panelup border-b border-line">
-                    <div className="font-display text-bone text-[15px] tracking-[0.06em]">{c.label}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-display text-bone text-[15px] tracking-[0.06em]">{c.label}</div>
+                      {canEdit && (
+                        <button type="button" onClick={() => setAdding(c.label)}
+                          title={`Add a guild to ${c.label}`} aria-label={`Add a guild to ${c.label}`}
+                          className="p-1 rounded text-ash hover:text-brassbright hover:bg-panel transition-colors">
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                     <div className="text-[11px] text-ash mt-1 leading-snug">{c.servers}</div>
                     {/* Composition of the cluster, not of the filtered view */}
                     <div className="flex h-1 rounded-full overflow-hidden bg-line mt-2.5" title={`${active.length} active guilds`}>
@@ -540,6 +669,13 @@ export default function ThreatBoard() {
         <GuildEditor
           guild={editing} data={data} flash={flash}
           onClose={() => setEditing(null)}
+          onSaved={load}
+        />
+      )}
+      {adding !== null && (
+        <AddGuild
+          data={data} initialCluster={adding} flash={flash}
+          onClose={() => setAdding(null)}
           onSaved={load}
         />
       )}

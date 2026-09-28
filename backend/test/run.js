@@ -15,6 +15,8 @@ const SUITES = [
   ['elite timer buttons', 'eliteButtons.js', false],
   // Pure rules — who the pool shows a leader, and availability across timezones.
   ['wargame fill rules', 'wargameFills.js', false],
+  // Crowns and new guilds, against an in-memory stand-in for the database.
+  ['threat board editing', 'threatBoard.js', false],
   ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],

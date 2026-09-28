@@ -19,7 +19,11 @@
 //     touches the alliance map at all;
 //   · status and cd are closed sets, enforced by CHECK constraints as well as
 //     by the guards below, because a bad value renders as an unstyled chip and
-//     drops out of every filter rather than failing visibly.
+//     drops out of every filter rather than failing visibly;
+//   · at most one guild per cluster holds the crown (`king`). A unique index
+//     enforces it (migrations/saas_011), and moving the crown goes through the
+//     set_threat_king RPC so the old holder is uncrowned in the same
+//     transaction. A guild that transfers servers leaves its crown behind.
 const SEED = require('../shared/threatBoard.json');
 
 const STATUSES = [
@@ -31,6 +35,41 @@ module.exports = function createThreatBoard(supabase) {
   const guilds = () => supabase.from('threat_guilds');
   const alliances = () => supabase.from('threat_alliances');
   const clusters = () => supabase.from('threat_clusters');
+
+  // Validate the editable fields that were supplied. Returns only the ones
+  // present, cleaned; throws a sentence the page can show as-is.
+  async function cleanFields(patch) {
+    const out = {};
+    if (patch.status !== undefined) {
+      if (!STATUSES.includes(patch.status)) throw new Error(`Unknown status "${patch.status}".`);
+      out.status = patch.status;
+    }
+    if (patch.cd !== undefined) {
+      const cd = patch.cd === '' || patch.cd === null ? null : patch.cd;
+      if (cd !== null && !CDS.includes(cd)) throw new Error(`Unknown transfer cooldown "${patch.cd}".`);
+      out.cd = cd;
+    }
+    if (patch.cluster !== undefined) {
+      const { data: c } = await clusters().select('label').eq('label', patch.cluster).maybeSingle();
+      if (!c) throw new Error(`Unknown cluster "${patch.cluster}".`);
+      out.cluster = patch.cluster;
+    }
+    if (patch.name !== undefined) {
+      const next = String(patch.name).trim();
+      if (!next) throw new Error('A guild needs a name.');
+      if (next.length > 120) throw new Error('That name is too long.');
+      out.name = next;
+    }
+    return out;
+  }
+
+  // (cluster, name) is unique, so both adding and editing check it first —
+  // the constraint would reject a clash anyway, but as a raw 23505.
+  async function assertNoClash(cluster, name, selfId) {
+    const { data: clash } = await guilds()
+      .select('id').eq('cluster', cluster).eq('name', name).maybeSingle();
+    if (clash && clash.id !== selfId) throw new Error(`${cluster} already has a guild called "${name}".`);
+  }
 
   const api = {
     STATUSES,
@@ -138,48 +177,69 @@ module.exports = function createThreatBoard(supabase) {
     async updateGuild(id, patch, actor) {
       const current = await api.byId(id);
       if (!current) throw new Error('That guild is not on the board.');
+      const clean = await cleanFields(patch);
       const row = {};
+      for (const [k, v] of Object.entries(clean)) if (v !== (current[k] ?? null)) row[k] = v;
 
-      if (patch.status !== undefined) {
-        if (!STATUSES.includes(patch.status)) throw new Error(`Unknown status "${patch.status}".`);
-        if (patch.status !== current.status) row.status = patch.status;
-      }
-      if (patch.cd !== undefined) {
-        const cd = patch.cd === '' || patch.cd === null ? null : patch.cd;
-        if (cd !== null && !CDS.includes(cd)) throw new Error(`Unknown transfer cooldown "${patch.cd}".`);
-        if (cd !== current.cd) row.cd = cd;
-      }
-      if (patch.cluster !== undefined && patch.cluster !== current.cluster) {
-        const { data: c } = await clusters().select('label').eq('label', patch.cluster).maybeSingle();
-        if (!c) throw new Error(`Unknown cluster "${patch.cluster}".`);
-        row.cluster = patch.cluster;
-      }
-      if (patch.name !== undefined) {
-        const next = String(patch.name).trim();
-        if (!next) throw new Error('A guild needs a name.');
-        if (next.length > 120) throw new Error('That name is too long.');
-        if (next !== current.name) row.name = next;
-      }
+      // A guild that transfers servers doesn't take the crown with it: the
+      // cluster it left still has whoever actually holds it, and the one it
+      // joins already has a king of its own (the unique index would refuse two).
+      const moving = !!row.cluster;
+      if (moving && current.king) row.king = false;
 
-      if (!Object.keys(row).length) throw new Error('Nothing to change.');
+      if (patch.king !== undefined && typeof patch.king !== 'boolean') throw new Error('Crown must be true or false.');
+      const wasKing = current.king && !moving;
+      const crown = patch.king === true && !wasKing;
+      const uncrown = patch.king === false && wasKing;
+
+      if (!Object.keys(row).length && !crown && !uncrown) throw new Error('Nothing to change.');
 
       // Uniqueness is (cluster, name), so a MOVE can collide just as a rename
       // can — transferring onto a server that already has a guild of this name
       // is the same clash. Checked against whichever of the two is changing.
-      const nextName = row.name ?? current.name;
-      const nextCluster = row.cluster ?? current.cluster;
-      if (row.name || row.cluster) {
-        const { data: clash } = await guilds()
-          .select('id').eq('cluster', nextCluster).eq('name', nextName).maybeSingle();
-        if (clash && clash.id !== id) {
-          throw new Error(`${nextCluster} already has a guild called "${nextName}".`);
-        }
+      if (row.name || row.cluster) await assertNoClash(row.cluster ?? current.cluster, row.name ?? current.name, id);
+
+      let data = current;
+      if (Object.keys(row).length || uncrown) {
+        if (uncrown) row.king = false;
+        row.updated_at = new Date().toISOString();
+        row.updated_by = actor || null;
+        const res = await guilds().update(row).eq('id', id).select().maybeSingle();
+        if (res.error) throw new Error(res.error.message);
+        data = res.data;
       }
 
-      row.updated_at = new Date().toISOString();
-      row.updated_by = actor || null;
+      // Crowned last, after any move, so it lands in the cluster the guild
+      // now sits on — and through the RPC, so the old holder is uncrowned in
+      // the same transaction.
+      let previousKing = null;
+      if (crown) {
+        const { data: prevId, error } = await supabase.rpc('set_threat_king', { p_guild: id, p_actor: actor || null });
+        if (error) throw new Error(error.message);
+        if (prevId) previousKing = (await api.byId(prevId))?.name || null;
+        data = await api.byId(id);
+      }
 
-      const { data, error } = await guilds().update(row).eq('id', id).select().maybeSingle();
+      return { ...data, previousKing, crownDropped: moving && current.king };
+    },
+
+    // A guild the board doesn't have yet — a new guild, or one the import
+    // missed. Starts uncrowned and unallied; both are set afterwards the same
+    // way as for any other guild.
+    async addGuild(fields, actor) {
+      const clean = await cleanFields({
+        name: fields.name ?? '',
+        cluster: fields.cluster ?? '',
+        status: fields.status ?? 'Potential',
+        cd: fields.cd ?? null,
+      });
+      await assertNoClash(clean.cluster, clean.name, null);
+      const { data, error } = await guilds().insert({
+        ...clean,
+        king: false,
+        updated_at: new Date().toISOString(),
+        updated_by: actor || null,
+      }).select().single();
       if (error) throw new Error(error.message);
       return data;
     },

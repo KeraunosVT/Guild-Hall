@@ -311,11 +311,25 @@ app.get('/api/threat-board', optionalAuth, async (req, res) => {
 // (see migrations/saas_008), so a name is not enough to identify one.
 app.patch('/api/threat-board/guild/:id', canEditThreat, async (req, res) => {
   if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
-  const { name, cluster, status, cd } = req.body || {};
+  // `king` moves the crown: true crowns this guild and uncrowns whoever held
+  // its cluster, in one transaction (migrations/saas_011); false leaves the
+  // cluster with no king.
+  const { name, cluster, status, cd, king } = req.body || {};
   try {
-    res.json(await threatBoard.updateGuild(req.params.id, { name, cluster, status, cd }, actorOf(req)));
+    res.json(await threatBoard.updateGuild(req.params.id, { name, cluster, status, cd, king }, actorOf(req)));
   } catch (e) {
     res.status(400).json({ error: e.message || 'Failed to save the guild.' });
+  }
+});
+
+// Add a guild to a cluster — a new guild, or one the spreadsheet import missed.
+app.post('/api/threat-board/guild', canEditThreat, async (req, res) => {
+  if (!threatBoard) return res.status(503).json({ error: 'Database not configured.' });
+  const { name, cluster, status, cd } = req.body || {};
+  try {
+    res.status(201).json(await threatBoard.addGuild({ name, cluster, status, cd }, actorOf(req)));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Failed to add the guild.' });
   }
 });
 
