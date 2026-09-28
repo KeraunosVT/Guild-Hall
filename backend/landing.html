@@ -250,7 +250,7 @@
           <a href="https://merc.guild-hall.gg">Mercs</a>
           <a href="https://tourney.guild-hall.gg">Tourney</a>
         </div>
-        <a href="/api/auth/login" class="btn btn-ghost" style="border-color:transparent;">Member login</a>
+        <a href="/api/auth/login" class="btn btn-ghost" style="border-color:transparent;" data-member-link>Member login</a>
         <a href="#early-access" class="btn btn-ghost nav-access">Request access</a>
       </div>
     </nav>
@@ -428,7 +428,7 @@
         <a href="https://ko-fi.com/keraunosgg" target="_blank" rel="noopener noreferrer">Support</a>
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>
-        <a href="/api/auth/login">Member login</a>
+        <a href="/api/auth/login" data-member-link>Member login</a>
       </div>
     </div>
     <div class="wrap disclaimer">
@@ -437,6 +437,21 @@
   </footer>
 
   <script>
+    // Signed-in members reach this page from the app's "Guild Hall home" link
+    // (/landing). For them "Member login" would send them through Discord again
+    // for nothing, so it becomes a straight link back into the app. Visitors
+    // get a 401 and the links stay as they are.
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        if (!me || !me.authenticated) return;
+        document.querySelectorAll('[data-member-link]').forEach((a) => {
+          a.href = '/';
+          a.textContent = 'Open the hall';
+        });
+      })
+      .catch(() => {});
+
     document.getElementById('year').textContent = new Date().getFullYear();
 
     // ── Screenshot tabs ─────────────────────────────────────────────────────

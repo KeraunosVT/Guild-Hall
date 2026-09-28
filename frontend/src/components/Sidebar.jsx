@@ -3,7 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
-  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair,
+  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair, Home,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -119,6 +119,16 @@ export default function Sidebar({ collapsed }) {
           Router has no route for it, so a NavLink would render an empty shell)
           and Ko-fi is off-site. Plain anchors, deliberately. */}
       <div className={`border-t border-line px-2 py-2 flex ${collapsed ? 'flex-col items-center gap-1' : 'flex-col gap-0.5'}`}>
+        {/* /landing, not /: the root sends anyone with a session straight back
+            into the app (server.js), so it can never reach the home page. */}
+        <a
+          href="/landing"
+          title={collapsed ? 'Guild Hall home' : undefined}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-ash hover:text-bone hover:bg-panel transition-colors"
+        >
+          <Home className="w-4 h-4 shrink-0" />
+          {!collapsed && <span className="truncate">Guild Hall home</span>}
+        </a>
         <a
           href="/commands"
           title={collapsed ? 'Bot commands' : undefined}
