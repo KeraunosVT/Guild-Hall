@@ -38,6 +38,10 @@ const ALL_PERMISSIONS = [
   // change who is allowed to sign in.
   { key: 'settings', label: 'Guild Settings', hint: 'House identity, timezone, Discord roles and channels' },
   { key: 'loa.admin', label: 'LOA Officer', hint: "See LOA reasons, cancel others', file on behalf" },
+  // Posting wargame fill requests for this guild and inviting players from the
+  // cross-guild pool. Starts with guild leaders only, like settings: an invite
+  // speaks for the house to players outside it.
+  { key: 'fills', label: 'Wargame Fills', hint: 'Post fill requests for this guild and invite players from the pool' },
   { key: 'loot.awards', label: 'Loot — Awards', hint: 'Award and revoke items, tag builds' },
   { key: 'loot.catalog', label: 'Loot — Catalog', hint: 'Manage loot items and categories' },
   { key: 'loot.currency', label: 'Loot — Lucent & Shards', hint: 'Grant and edit currency' },

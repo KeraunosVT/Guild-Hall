@@ -13,6 +13,8 @@ const SUITES = [
   ['leak audit (static)', 'leakAudit.js', false],
   // Stubbed data module, so it runs without a database too.
   ['elite timer buttons', 'eliteButtons.js', false],
+  // Pure rules — who the pool shows a leader, and availability across timezones.
+  ['wargame fill rules', 'wargameFills.js', false],
   ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],

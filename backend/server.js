@@ -34,6 +34,8 @@ const createLateAttendance = require('./lateAttendance');
 const createEventDetail = require('./eventDetail');
 const createAuditLog = require('./auditLog');
 const createThreatBoard = require('./threatBoard');
+const createWargameFills = require('./wargameFills');
+const sites = require('./sites');
 
 const gearUpload = multer({
   storage: multer.memoryStorage(),
@@ -116,6 +118,12 @@ const eliteTimers = supabase ? createEliteTimers(supabase) : null;
 // The threat board's guild list is a static import, so this only needs a client
 // for the alliance map layered on top of it.
 const threatBoard = supabase ? createThreatBoard(supabase) : null;
+// The wargame fill pool reads the threat board for opponents and alliances, and
+// DMs through the gateway — best-effort, since a bot can only DM people it
+// shares a server with.
+const wargameFills = threatBoard
+  ? createWargameFills(supabase, { requireAuth, threatBoard, notify: gateway.sendDirectMessage })
+  : null;
 const gearIlvl = supabase ? createGearIlvl(supabase) : null;
 const identities = supabase ? createIdentities(supabase) : null;
 // identities is built above: LOA display names resolve through it so an
@@ -178,6 +186,19 @@ const canonicalGuildFor = (guild, name) => {
 
 // Shorthand for the scoped client inside a route handler.
 const dbFor = (req) => tenantDb(supabase, req.guildId);
+
+// ── THE MERC HOST'S API SURFACE ──────────────────────────────────────────────
+// merc.guild-hall.gg is the same process as the guild app, but it only needs
+// the fill pool, the threat board it reads opponents from, and login. Every
+// other API answers 404 there. Guild data is protected by the guild wall below
+// regardless; this keeps the second front door from being a second way in to
+// everything else, which is cheaper to reason about than proving it's harmless.
+const MERC_API = ['/health', '/auth', '/fills', '/threat-board'];
+app.use('/api', (req, res, next) => {
+  if (!sites.isMerc(req)) return next();
+  if (MERC_API.some((p) => req.path === p || req.path.startsWith(`${p}/`))) return next();
+  return res.status(404).json({ error: 'Not found' });
+});
 
 // Health check (public)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -316,6 +337,16 @@ app.delete('/api/threat-board/ally/:id', canEditThreat, async (req, res) => {
     res.status(400).json({ error: e.message || 'Failed to break the alliance.' });
   }
 });
+
+// ── WARGAME FILLS ────────────────────────────────────────────────────────────
+// Above the guild wall, like the threat board, and for a related reason: the
+// pool belongs to no house. Most of the people in it are in no Guild Hall guild
+// at all, so there is no x-guild-id to resolve. Every route still requires a
+// session (the router mounts requireAuth itself), and every rule about who may
+// see or change what lives in backend/wargameFills.js.
+app.use('/api/fills', wargameFills
+  ? wargameFills.router
+  : (req, res) => res.status(503).json({ error: 'Database not configured.' }));
 
 // Discord login routes (public)
 app.use('/api/auth', authRouter);
@@ -1685,6 +1716,7 @@ app.get('/terms', (req, res) => res.sendFile(TERMS_PATH));
 // it straight into their own Discord.
 app.get('/commands', (req, res) => res.sendFile(COMMANDS_PATH));
 app.get('/', (req, res, next) => {
+  if (sites.isMerc(req)) return next();          // fill pool → app, which renders its own front page
   if (hasValidSession(req)) return next();       // member → app (static index.html)
   return res.sendFile(LANDING_PATH);             // visitor → landing
 });

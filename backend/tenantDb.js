@@ -41,6 +41,14 @@ const GLOBAL_TABLES = new Set([
   'threat_alliances',
   'threat_guilds',
   'threat_clusters',
+  // The wargame fill pool. Global because a fill plays for a guild that is not
+  // their own, and most players in the pool belong to no tenant at all. Every
+  // access rule — owner-only profiles, leader-only pools, conflict hiding —
+  // lives in backend/wargameFills.js. See migrations/saas_009.
+  'fill_profiles',
+  'fill_leader_claims',
+  'fill_requests',
+  'fill_invites',
 ]);
 
 function tenantDb(supabase, guildId) {

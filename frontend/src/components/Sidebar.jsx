@@ -3,7 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
-  Terminal, Heart, CalendarCheck, CalendarRange,
+  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -33,6 +33,9 @@ export const memberLinks = [
   { to: '/attendance', label: 'Attendance', end: true, icon: ClipboardCheck },
   { to: '/classes', label: 'Classes', icon: Layers },
   { to: '/gear', label: 'Gear Level', icon: Gauge },
+  // Filling for OTHER guilds' wargames. Last, because it is the one member
+  // page about somewhere other than this house.
+  { to: '/fills', label: 'Wargame Fills', icon: Handshake },
 ];
 
 // `perm` is the capability each destination needs — the same one its page gate
@@ -52,6 +55,7 @@ export const adminLinks = [
   ] },
   { to: '/admin/attendance', label: 'Attendance', icon: ClipboardCheck, perm: 'attendance' },
   { to: '/admin/gear-levels', label: 'Gear Levels', icon: Gauge, perm: 'gear' },
+  { to: '/admin/fills', label: 'Fill Requests', icon: Crosshair, perm: 'fills' },
   { to: '/admin/permissions', label: 'Permissions', icon: ShieldCheck, perm: 'permissions' },
   { to: '/admin/audit-log', label: 'Audit Log', icon: ScrollText, perm: 'audit' },
   // Last in the section: it is the least-used page and the one with the widest

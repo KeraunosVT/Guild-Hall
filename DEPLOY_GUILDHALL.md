@@ -259,6 +259,41 @@ Future updates: commit+sync in VS Code →
   Discord application, the old Supabase project, and let tnlstats.com lapse
   — nothing references them.
 
+## 10. Wargame fills at merc.guild-hall.gg
+
+The fill pool is the same app on a second host — no new service, no new port.
+
+1. **Database:** SQL Editor → run `migrations/saas_009_wargame_fills.sql`
+   (after saas_008). Run it on the test project too.
+2. **DNS (Namecheap → Advanced DNS):** add an **A Record**, host `merc`,
+   value YOUR_DROPLET_IP.
+3. **Discord Developer Portal → the Guild Hall application → OAuth2 →
+   Redirects:** add `https://merc.guild-hall.gg/api/auth/discord/callback`
+   next to the existing one.
+4. **Droplet:** add to `backend/.env`, then `sudo systemctl restart guildhall`:
+
+```bash
+MERC_ORIGIN=https://merc.guild-hall.gg
+```
+
+5. **Caddy:** add a block to `/etc/caddy/Caddyfile` — same port as the main
+   site — then `sudo systemctl reload caddy`:
+
+```
+merc.guild-hall.gg {
+    reverse_proxy localhost:3000
+    encode gzip
+}
+```
+
+Check: https://merc.guild-hall.gg shows the fill pool's front page, and
+signing in with a Discord account that is in **no** Guild Hall guild lands on
+"List yourself as a fill" rather than an access error.
+
+Sessions stay per host on purpose: signing in on merc doesn't sign you in on
+guild-hall.gg. Never set a `Domain=.guild-hall.gg` cookie — it would also be
+sent to tourney.guild-hall.gg, which is a different app.
+
 ## Troubleshooting
 
 | Symptom | Check |

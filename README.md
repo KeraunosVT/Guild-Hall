@@ -105,6 +105,7 @@ Configuration comes in two halves, and which half a setting belongs in is not a 
 | `CORS_ORIGINS` | Optional, comma-separated trusted origins (local dev only — production is same-origin) |
 | `SINGLE_GUILD_ID` | Optional. Pins the whole deployment to one tenant's `guilds.id`, for a private single-guild install |
 | `TEST_SUPABASE_URL`, `TEST_SUPABASE_SERVICE_KEY` | Optional. A scratch Supabase project for the test suite to write to, so tests never touch live data |
+| `MERC_ORIGIN` | Optional. The wargame fill pool's own host, e.g. `https://merc.guild-hall.gg` — see `backend/sites.js` |
 | `APP_URL`, `NODE_ENV`, `SESSION_REVERIFY_MINUTES`, `GEAR_SUBMIT_LIMIT_PER_HOUR`, `IDENTITY_CACHE_SECONDS`, `MEMBER_CACHE_SECONDS`, `GUILD_REGISTRY_CACHE_SECONDS`, `WEAPON_LEGEND_PATH` | Secondary tuning, all have sensible defaults |
 
 **Per-guild config** lives on that guild's row in the `guilds` table — house name, tag, past-name aliases, motto, creed, timezone, guild-night rollover, officer/allow-list/roster role ids, every channel the bot posts to, and one it reads from (`attendance_voice_channel_id`, the voice channel `/attendance` snaps when nobody names another). Officers edit it themselves at **Guild Settings** in the app; a new tenant is seeded with `node backend/scripts/onboardGuild.js --config guild.json` (`--dry-run` prints what it would write).

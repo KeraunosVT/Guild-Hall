@@ -70,3 +70,7 @@ services:
         sync: false # role in it whose holders may edit the board
       - key: GUILD_HALL_STAFF_IDS
         sync: false # optional: always-staff Discord user ids, comma separated
+      # The wargame fill pool's own host (backend/sites.js). Empty = no merc
+      # host; the fill pages still live inside the guild app.
+      - key: MERC_ORIGIN
+        sync: false # e.g. https://merc.guild-hall.gg

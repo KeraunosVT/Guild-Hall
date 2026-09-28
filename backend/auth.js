@@ -35,6 +35,7 @@ const { fetchMember, botConfigured } = require('./discord');
 const perms = require('./permissions');
 const guildRegistry = require('./guildRegistry');
 const staff = require('./staff');
+const sites = require('./sites');
 // Just the header name — requiring the module's factory would be a cycle.
 const { GUILD_HEADER } = require('./guildContext');
 
@@ -100,12 +101,27 @@ if (authConfigured && !botConfigured) {
 const isProd = process.env.NODE_ENV === 'production';
 const baseCookie = { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' };
 
+// ── Which front door ────────────────────────────────────────────────────────
+// The same app answers on guild-hall.gg and merc.guild-hall.gg (the wargame
+// fill pool — see backend/sites.js). A login has to come back to the host it
+// started on: the state cookie is host-only, and so is the session cookie that
+// results. So the redirect URI and the post-login landing are picked per host.
+//
+// Only two answers are possible, and both are configuration: the merc origin
+// when the Host header matches MERC_ORIGIN exactly, otherwise the main site's
+// DISCORD_REDIRECT_URI. Nothing is ever built from the Host header itself.
+// Both redirect URIs must be registered on the Discord application.
+const siteFor = (req) => (sites.isMerc(req)
+  ? { merc: true, redirectUri: `${sites.MERC_ORIGIN}/api/auth/discord/callback`, appUrl: `${sites.MERC_ORIGIN}/` }
+  : { merc: false, redirectUri: DISCORD_REDIRECT_URI, appUrl: APP_URL });
+
 // ── Begin login: redirect to Discord with a CSRF state ──────────────────────
 router.get('/login', (req, res) => {
   if (!authConfigured) return res.status(503).send('Discord login is not configured.');
 
   const state = crypto.randomBytes(16).toString('hex');
   res.cookie(STATE_COOKIE, state, { ...baseCookie, maxAge: 10 * 60 * 1000 });
+  const site = siteFor(req);
 
   // The `guilds` scope (list the servers you're in) is requested ONLY on the
   // shared deployment, where login has to discover which of the user's servers
@@ -117,7 +133,7 @@ router.get('/login', (req, res) => {
 
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
-    redirect_uri: DISCORD_REDIRECT_URI,
+    redirect_uri: site.redirectUri,
     response_type: 'code',
     scope,
     state,
@@ -134,6 +150,8 @@ router.get('/discord/callback', async (req, res) => {
 
   const { code, state } = req.query;
   const savedState = req.cookies?.[STATE_COOKIE];
+  const site = siteFor(req);
+  const APP = site.appUrl;
   res.clearCookie(STATE_COOKIE, baseCookie);
 
   if (!code || !state || state !== savedState) {
@@ -147,7 +165,7 @@ router.get('/discord/callback', async (req, res) => {
       `state=${state ? 'present' : 'MISSING'}`,
       `cookie=${savedState ? 'present' : 'MISSING'}`,
       savedState && state && savedState !== state ? '(both present but different)' : '');
-    return res.redirect(`${APP_URL}?auth=state`);
+    return res.redirect(`${APP}?auth=state`);
   }
 
   try {
@@ -163,7 +181,7 @@ router.get('/discord/callback', async (req, res) => {
         client_secret: DISCORD_CLIENT_SECRET,
         grant_type: 'authorization_code',
         code: String(code),
-        redirect_uri: DISCORD_REDIRECT_URI,
+        redirect_uri: site.redirectUri,
       }).toString(),
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -183,9 +201,9 @@ router.get('/discord/callback', async (req, res) => {
         `Auth callback: token exchange failed (HTTP ${tokenRes.status}).`,
         `discord=${JSON.stringify(tokenRes.data)}`,
         `client_id=${DISCORD_CLIENT_ID}`,
-        `redirect_uri=${DISCORD_REDIRECT_URI}`,
+        `redirect_uri=${site.redirectUri}`,
       );
-      return res.redirect(`${APP_URL}?auth=config`);
+      return res.redirect(`${APP}?auth=config`);
     }
     const accessToken = tokenRes.data.access_token;
 
@@ -214,9 +232,17 @@ router.get('/discord/callback', async (req, res) => {
     // Staff pass both gates below. Everyone else must be in a guild we host
     // (not_member) AND clear its role bar (forbidden) — the two failures stay
     // distinct because they have entirely different fixes.
-    if (!isStaff) {
-      if (!hosted.length) return res.redirect(`${APP_URL}?auth=not_member`);
-      if (!memberships.length) return res.redirect(`${APP_URL}?auth=forbidden`);
+    //
+    // The merc host passes them too. The fill pool exists for players who
+    // belong to no Guild Hall guild, so there a session with an empty guild
+    // list is the normal case, not a failure. It can't reach guild data: every
+    // guild route resolves membership from this list (guildContext.js), and
+    // an empty list resolves nothing. Guild Hall members signing in on merc
+    // still get their memberships, which is what lets an officer post fill
+    // requests for their guild from there.
+    if (!isStaff && !site.merc) {
+      if (!hosted.length) return res.redirect(`${APP}?auth=not_member`);
+      if (!memberships.length) return res.redirect(`${APP}?auth=forbidden`);
     }
 
     // 5. Issue a signed session cookie carrying every membership.
@@ -224,9 +250,9 @@ router.get('/discord/callback', async (req, res) => {
     // Identity falls back to /users/@me because buildMemberships only reports a
     // user for guilds that answered — a staff member in no hosted guild has
     // none, and would otherwise get a session with no id at all.
-    issueSession(res, await buildSession(user.id ? user : identity, memberships, isStaff));
+    issueSession(res, await buildSession(user.id ? user : identity, memberships, isStaff, site.merc));
 
-    res.redirect(APP_URL);
+    res.redirect(APP);
   } catch (err) {
     // Anything unexpected. Include the HTTP status and body when it came from
     // an API call — err.message alone is "Request failed with status code 401",
@@ -236,7 +262,7 @@ router.get('/discord/callback', async (req, res) => {
     console.error('Auth callback error:', err.message,
       status ? `status=${status}` : '',
       body ? `body=${JSON.stringify(body).slice(0, 300)}` : '');
-    res.redirect(`${APP_URL}?auth=error`);
+    res.redirect(`${APP}?auth=error`);
   }
 });
 
@@ -416,8 +442,12 @@ async function buildMemberships(accessToken, hosted) {
 // boolean, so it costs the cookie nothing.
 // `isStaff` is passed in when the caller has already resolved it, so a login
 // does not ask Discord the same question twice; omitted, it is resolved here.
-async function buildSession(u, memberships, isStaff) {
+// `merc` marks a session issued on the fill-pool host, where having no guild
+// is allowed — reverify() needs to know that, since it has no request to read
+// a host from. One boolean, and only present when true.
+async function buildSession(u, memberships, isStaff, merc) {
   return {
+    ...(merc ? { merc: true } : {}),
     id: u.id,
     username: u.global_name || u.username || 'Member',
     avatar: u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png` : null,
@@ -588,6 +618,11 @@ async function reverify(user) {
   // kept platform access until their 7-day token expired, so re-ask instead.
   // Guarded on Array.isArray so a pre-multi-guild session, which also has no
   // list, still falls through to the untouched legacy path below.
+  // A fill-pool session with no guild is valid by design (see the callback).
+  // Nothing to re-check but staff standing, which is re-read here.
+  if (!list.length && Array.isArray(user.guilds) && user.merc) {
+    return buildSession(user, [], undefined, true);
+  }
   if (!list.length && Array.isArray(user.guilds) && user.staff) {
     return (await staff.isStaff(user.id)) ? buildSession(user, [], true) : REVOKED;
   }
@@ -605,9 +640,11 @@ async function reverify(user) {
   }));
 
   const memberships = (await Promise.all(results)).filter(Boolean);
-  if (memberships.length) return buildSession(user, memberships);
+  if (memberships.length) return buildSession(user, memberships, undefined, user.merc);
   // Nothing left. Only call that a revocation if Discord actually answered —
-  // otherwise a rate limit would sign out every user at once.
+  // otherwise a rate limit would sign out every user at once. On the fill-pool
+  // host, losing every guild just makes it a guildless session.
+  if (anyReachable && user.merc) return buildSession(user, [], undefined, true);
   return anyReachable ? REVOKED : null;
 }
 

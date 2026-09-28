@@ -35,6 +35,14 @@ import GearLevels from './pages/GearLevels';
 import AuditLog from './pages/AuditLog';
 import GuildSettings from './pages/GuildSettings';
 import ThreatBoard from './pages/ThreatBoard';
+import MercApp from './pages/fills/MercApp';
+import { FillsMemberPage, FillsAdminPage, FillsAdminDetail } from './pages/fills/GuildHallFills';
+
+// merc.guild-hall.gg is the same build served on a second host: the wargame
+// fill pool as its own site, for players who may belong to no guild here. The
+// server decides what that host may call (backend/sites.js); this only decides
+// what it looks like. Read once — the host can't change without a page load.
+const IS_MERC = typeof window !== 'undefined' && window.location.hostname.startsWith('merc.');
 
 function Layout() {
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
@@ -126,6 +134,10 @@ function Gate() {
 }
 
 function App() {
+  // No GuildProvider: the fill pool has no active guild, and most of its users
+  // have none at all.
+  if (IS_MERC) return <AuthProvider><MercApp /></AuthProvider>;
+
   return (
     <AuthProvider>
       <GuildProvider>
@@ -165,6 +177,10 @@ function App() {
                 <Route path="/attendance/:id" element={<EventAttendance />} />
                 <Route path="/classes" element={<Classes />} />
                 <Route path="/gear" element={<GearLevel />} />
+                {/* Wargame fills — the same pages merc.guild-hall.gg serves, inside
+                    the sidebar. The pool itself is cross-guild; see backend/wargameFills.js. */}
+                <Route path="/fills" element={<FillsMemberPage />} />
+                <Route path="/fills/invites" element={<FillsMemberPage />} />
                 <Route path="/admin" element={<Admin />} />
                 <Route path="/admin/parties" element={<Parties />} />
                 <Route path="/admin/names" element={<Names />} />
@@ -175,6 +191,8 @@ function App() {
                 <Route path="/admin/loot/history" element={<LootHistory />} />
                 <Route path="/admin/attendance" element={<Attendance />} />
                 <Route path="/admin/gear-levels" element={<GearLevels />} />
+                <Route path="/admin/fills" element={<FillsAdminPage />} />
+                <Route path="/admin/fills/:id" element={<FillsAdminDetail />} />
                 <Route path="/admin/permissions" element={<Permissions />} />
                 <Route path="/admin/audit-log" element={<AuditLog />} />
                 <Route path="/admin/settings" element={<GuildSettings />} />

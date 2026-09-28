@@ -1530,10 +1530,29 @@ function getVoiceMembers(guildHall, channelId) {
   }));
 }
 
+// One DM, best-effort, for the wargame fill pool. Returns whether it was sent.
+//
+// Discord only lets a bot DM someone it shares a server with, and a fill may
+// share none — so a false here is expected, not an error. The fills pages are
+// the reliable channel; this is only the nudge. Mentions are disabled: the text
+// carries guild and player names typed by other people.
+async function sendDirectMessage(userId, content) {
+  if (!ready || !client || !userId || !content) return false;
+  try {
+    const user = await client.users.fetch(String(userId));
+    await user.send({ content: content.slice(0, 1900), allowedMentions: { parse: [] } });
+    return true;
+  } catch (err) {
+    console.error(`Fill DM to ${userId} not delivered:`, err.message);
+    return false;
+  }
+}
+
 module.exports = {
   start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
   notifyLateAttendance,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
+  sendDirectMessage,
 };
 
 // ── Test seam ───────────────────────────────────────────────────────────────

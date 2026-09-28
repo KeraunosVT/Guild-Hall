@@ -9,6 +9,7 @@ import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Tabs from '../components/ui/Tabs';
 import { useFlash } from '../components/ui/useFlash';
+import { STATUSES } from '../threatStatus';
 
 // The Americas threat board — a PUBLIC page, belonging to no guild. It renders
 // outside Gate and outside Layout (see App.jsx), which is why it carries its own
@@ -28,18 +29,6 @@ import { useFlash } from '../components/ui/useFlash';
 // unreadable together, so it owns structure instead: a rail down the left of a
 // bonded pair, and the pair rendered as one block. Keep it that way when
 // editing — the moment alliance borrows a hue, the board stops being scannable.
-const STATUSES = [
-  { key: 'Threat', short: 'Threat', dot: 'bg-fuchsia-400', text: 'text-fuchsia-300', tint: 'bg-fuchsia-500/10' },
-  // Orange, not amber. Competitive and Potential sit next to each other in the
-  // ramp, and amber-400 was only ~8° of hue from yellow-300 — close enough that
-  // the two tiers read as one at chip size. Orange puts ~24° between them, and
-  // it is nearer the source sheet's own #FF9900 besides.
-  { key: 'Competitive', short: 'Competitive', dot: 'bg-orange-400', text: 'text-orange-300', tint: 'bg-orange-500/10' },
-  { key: 'Potential', short: 'Potential', dot: 'bg-yellow-300', text: 'text-yellow-200', tint: 'bg-yellow-500/10' },
-  { key: 'Rebuild/TBD', short: 'Rebuild / TBD', dot: 'bg-sky-400', text: 'text-sky-300', tint: 'bg-sky-500/10' },
-  { key: 'Not Competitive', short: 'Not competitive', dot: 'bg-emerald-400', text: 'text-emerald-300', tint: 'bg-emerald-500/10' },
-  { key: 'Disbanded/Merged', short: 'Disbanded', dot: 'bg-zinc-500', text: 'text-ash', tint: 'bg-zinc-500/10' },
-];
 const RANK = Object.fromEntries(STATUSES.map((s, i) => [s.key, i]));
 const META = Object.fromEntries(STATUSES.map((s) => [s.key, s]));
 const DEAD = 'Disbanded/Merged';
