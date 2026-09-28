@@ -71,6 +71,8 @@
     .btn-primary:hover { background: var(--brassbright); transform: translateY(-1px); }
     .btn-ghost { background: transparent; border-color: var(--line); color: var(--bone); }
     .btn-ghost:hover { border-color: var(--brass); color: var(--brassbright); }
+    .nav-links { display: flex; gap: 22px; margin-right: 8px; font-family: var(--font-display); font-weight: 500; font-size: 15px; color: var(--ash); }
+    .nav-links a:hover { color: var(--brassbright); }
 
     /* hero */
     .hero { text-align: center; padding: 80px 0 64px; }
@@ -92,7 +94,10 @@
     .hero-note { margin-top: 18px; font-size: 14px; color: var(--ash); }
 
     /* section heading */
-    .section { padding: 56px 0; }
+    /* padding-block, not the shorthand: these sections also carry .wrap, and
+       `padding: 56px 0` wiped out its side gutter — every section ran edge to
+       edge on a phone. */
+    .section { padding-block: 56px; }
     .section h2 {
       font-family: var(--font-display); font-weight: 700;
       font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.01em;
@@ -115,6 +120,17 @@
     .card .ico svg { width: 22px; height: 22px; stroke: var(--brassbright); }
     .card h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin-bottom: 8px; }
     .card p { color: var(--ash); font-size: 15px; }
+
+    /* ── community tools ───────────────────────────────────────────────────
+       The three pages open to every player, not only guilds on Guild Hall.
+       Whole cards are links, so they get a visible "open" line and a focus
+       ring — a card that navigates must look like it does. */
+    .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+    a.card { display: flex; flex-direction: column; }
+    a.card:focus-visible { outline: 2px solid var(--brassbright); outline-offset: 3px; }
+    .card .where { font-family: var(--font-display); font-size: 12.5px; color: var(--ash); letter-spacing: 0.02em; margin: -2px 0 10px; }
+    .card .go { margin-top: auto; padding-top: 16px; font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--brassbright); }
+    .card:hover .go { text-decoration: underline; text-underline-offset: 4px; }
 
     /* ── screenshot showcase ────────────────────────────────────────────────
        One image on screen at a time, switched by the tab strip. A grid of eight
@@ -192,13 +208,21 @@
     /* footer */
     footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 32px 0; }
     .foot-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; color: var(--ash); font-size: 14px; }
-    .foot-links { display: flex; gap: 20px; }
+    .foot-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
     .foot-links a:hover { color: var(--brassbright); }
     .disclaimer { text-align: center; color: var(--ash); font-size: 12.5px; margin-top: 14px; opacity: 0.8; }
 
+    /* The top bar keeps only the login and access buttons on narrow screens;
+       the same three links are in the section below and the footer. */
+    @media (max-width: 860px) {
+      .nav-links { display: none; }
+    }
     @media (max-width: 640px) {
       .hero { padding: 56px 0 40px; }
-      .section { padding: 40px 0; }
+      .foot-links { justify-content: center; }
+      /* Two buttons don't fit beside the wordmark; the hero repeats this one. */
+      .nav-access { display: none; }
+      .section { padding-block: 40px; }
       .foot-inner { flex-direction: column; text-align: center; }
     }
   </style>
@@ -221,8 +245,13 @@
         </svg>
       </div>
       <div style="display:flex; gap:12px; align-items:center;">
+        <div class="nav-links">
+          <a href="/threat-board">Threat Board</a>
+          <a href="https://merc.guild-hall.gg">Mercs</a>
+          <a href="https://tourney.guild-hall.gg">Tourney</a>
+        </div>
         <a href="/api/auth/login" class="btn btn-ghost" style="border-color:transparent;">Member login</a>
-        <a href="#early-access" class="btn btn-ghost">Request access</a>
+        <a href="#early-access" class="btn btn-ghost nav-access">Request access</a>
       </div>
     </nav>
   </header>
@@ -275,6 +304,38 @@
           <h3>Roles you control</h3>
           <p>Fine-grained permissions mapped to your Discord roles. Officers get the keys; members see what they should.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- COMMUNITY TOOLS -->
+    <!-- Open to every Throne and Liberty player, whether or not their guild uses
+         Guild Hall: the threat board is public, merc lets anyone sign in with
+         Discord, and the tournament is its own site. -->
+    <section class="section wrap" id="community">
+      <h2>Free for every player</h2>
+      <p class="lead">You don't need your guild on Guild Hall to use these. Built for the Throne &amp; Liberty Americas servers.</p>
+      <div class="tools">
+        <a class="card" href="/threat-board">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg></div>
+          <h3>Threat Board</h3>
+          <div class="where">guild-hall.gg/threat-board</div>
+          <p>Every guild on the five Americas clusters, rated by how much of a fight they put up, with who holds each cluster and who is allied with whom.</p>
+          <span class="go">Open the board →</span>
+        </a>
+        <a class="card" href="https://merc.guild-hall.gg">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M11 17l2 2a1 1 0 1 0 3-3"/><path d="M14 14l2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"/><path d="M21 3l1 11h-2M3 3L2 14l6.5 6.5a1 1 0 1 0 3-3M3 4h8"/></svg></div>
+          <h3>Mercs</h3>
+          <div class="where">merc.guild-hall.gg</div>
+          <p>Short-handed for a wargame? Leaders post the slots they need and invite fills. Players list their role, classes and hours, and are never shown to the guild they'd be playing against.</p>
+          <span class="go">Find or be a fill →</span>
+        </a>
+        <a class="card" href="https://tourney.guild-hall.gg">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg></div>
+          <h3>TL Tourney</h3>
+          <div class="where">tourney.guild-hall.gg</div>
+          <p>The community tournament: sign up, follow the captains' draft and the bracket live, and call the results before they happen.</p>
+          <span class="go">Go to the tourney →</span>
+        </a>
       </div>
     </section>
 
@@ -360,6 +421,9 @@
     <div class="wrap foot-inner">
       <div>© <span id="year"></span> Guild Hall</div>
       <div class="foot-links">
+        <a href="/threat-board">Threat Board</a>
+        <a href="https://merc.guild-hall.gg">Mercs</a>
+        <a href="https://tourney.guild-hall.gg">Tourney</a>
         <a href="/commands">Bot commands</a>
         <a href="https://ko-fi.com/keraunosgg" target="_blank" rel="noopener noreferrer">Support</a>
         <a href="/privacy">Privacy</a>
