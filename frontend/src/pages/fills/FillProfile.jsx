@@ -72,6 +72,16 @@ export default function FillProfile({ me, onSaved }) {
 
   return (
     <div className="space-y-6">
+      {me.profile?.staff_paused && (
+        <div className="rounded-lg border border-oxblood/40 bg-oxblooddeep/20 px-4 py-3 text-sm space-y-1">
+          <div className="font-semibold">Guild Hall staff have paused your listing</div>
+          <div>{me.profile.staff_paused_reason}</div>
+          <div className="text-ash text-xs">
+            Leaders can&apos;t find you until staff lift it, whatever your Listed switch says. Invites you already have still work.
+            Ask in the Guild Hall Discord if you think this is a mistake.
+          </div>
+        </div>
+      )}
       {me.suggestion && !listed && (
         <p className="text-sm text-ash">
           Started from what <span className="text-bone">{me.suggestion.from}</span> has on file for you. Check it and save to list yourself.

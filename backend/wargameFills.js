@@ -168,6 +168,24 @@ function cleanProfile(body, knownGuild) {
   };
 }
 
+// Whether a profile can be found by leaders: the player's own Listed switch is
+// on, and staff haven't paused it (migrations/saas_010). Only staff can lift a
+// staff pause, whatever the player does with their own switch.
+function inPool(profile) {
+  return !!profile && profile.active === true && profile.staff_paused !== true;
+}
+
+// Answers per status for each player, from a list of invite rows.
+function inviteStats(rows) {
+  const out = new Map();
+  for (const i of rows || []) {
+    const s = out.get(i.discord_id) || { invited: 0, accepted: 0, declined: 0, withdrawn: 0, missed: 0 };
+    if (i.status in s) s[i.status] += 1;
+    out.set(i.discord_id, s);
+  }
+  return out;
+}
+
 // The Guild Hall guilds this session may post fill requests for.
 function leaderGuilds(user) {
   return (Array.isArray(user && user.guilds) ? user.guilds : [])
@@ -290,6 +308,29 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
   const fail = (res, e, fallback) => res.status(400).json({ error: e.message || fallback });
   const opponentName = (idx, r) => idx.brief(r.opponent_id)?.name || 'an unknown guild';
 
+  // Every row of a query, a page at a time. PostgREST caps a single response
+  // (1000 rows on Supabase by default) and says nothing when it does — a pool
+  // read with .limit(2000) would silently stop at the thousandth player. The
+  // query passed in must be ordered, or pages can overlap and skip rows.
+  async function readAll(make, pageSize = 1000, cap = 50000) {
+    const out = [];
+    for (let from = 0; from < cap; from += pageSize) {
+      const { data, error } = await make().range(from, from + pageSize - 1);
+      if (error) throw new Error(error.message);
+      out.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    return out;
+  }
+
+  // A profile as its owner sees it: everything except which staff member
+  // paused it. The reason is theirs to read; the name is not.
+  const ownView = (p) => {
+    if (!p) return null;
+    const { staff_paused_by: _by, ...rest } = p;
+    return rest;
+  };
+
   // ── Me ───────────────────────────────────────────────────────────────────
   // Everything the fills pages need to decide what to show: the profile (or a
   // starting point drawn from Guild Hall data), leader standing, staff flag.
@@ -303,7 +344,7 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
       if (error) throw new Error(error.message);
       res.json({
         user: { id: req.user.id, username: req.user.username, avatar: req.user.avatar },
-        profile: profile || null,
+        profile: ownView(profile),
         suggestion: profile ? null : await suggestFromGuildHall(req.user),
         guildHall: (req.user.guilds || []).map((g) => ({ guild_id: g.guild_id, house: g.house, tag: g.tag })),
         leader: {
@@ -356,7 +397,7 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
         updated_at: new Date().toISOString(),
       }).select().single();
       if (error) throw new Error(error.message);
-      res.json({ profile: data });
+      res.json({ profile: ownView(data) });
     } catch (e) {
       fail(res, e, 'Could not save your profile.');
     }
@@ -543,11 +584,11 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
       const leader = await leaderContext(req.user);
       if (!canManage(req.user, leader, r)) return res.status(403).json({ error: 'That request belongs to another guild.' });
 
-      const [idx, isVerified, { data: invs }, { data: pool }] = await Promise.all([
+      const [idx, isVerified, { data: invs }, pool] = await Promise.all([
         boardIndex(),
         verifiedLeaders([r]),
         invites().select('*').eq('request_id', r.id),
-        profiles().select('*').eq('active', true).limit(2000),
+        readAll(() => profiles().select('*').eq('active', true).eq('staff_paused', false).order('discord_id')),
       ]);
       const filled = await filledCounts([r.id]);
       const inviteOf = new Map((invs || []).map((i) => [i.discord_id, i]));
@@ -641,7 +682,7 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
       if (!(r.slots?.[role] > 0)) throw new Error(`This request has no ${role} slots.`);
 
       const { data: p } = await profiles().select('*').eq('discord_id', String(target || '')).maybeSingle();
-      if (!p || !p.active) return res.status(404).json({ error: 'That player is not in the fill pool.' });
+      if (!inPool(p)) return res.status(404).json({ error: 'That player is not in the fill pool.' });
       if (p.discord_id === req.user.id) throw new Error('You can\'t invite yourself.');
       const idx = await boardIndex();
       if (conflictFor(p, r, idx.partnerOf)) return res.status(404).json({ error: 'That player is not in the fill pool.' });
@@ -728,7 +769,7 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
   // ── Staff: deciding claims ───────────────────────────────────────────────
   const staffOnly = (req, res, next) => (req.user?.staff
     ? next()
-    : res.status(403).json({ error: 'Only Guild Hall staff can review leader claims.' }));
+    : res.status(403).json({ error: 'Only Guild Hall staff can do that.' }));
 
   router.get('/claims', staffOnly, async (req, res) => {
     try {
@@ -770,9 +811,93 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
     }
   });
 
+  // ── Staff: the whole pool ────────────────────────────────────────────────
+  // Every profile, listed or not, with nothing hidden. Leaders only ever see a
+  // conflict-filtered slice for one request; staff run the platform and need
+  // the full picture to spot trolls, impersonators and repeat no-shows.
+  router.get('/staff/pool', staffOnly, async (req, res) => {
+    try {
+      const [list, invs, idx] = await Promise.all([
+        readAll(() => profiles().select('*').order('discord_id')),
+        readAll(() => invites().select('id, discord_id, status').order('id')),
+        boardIndex(),
+      ]);
+      const stats = inviteStats(invs);
+      const none = { invited: 0, accepted: 0, declined: 0, withdrawn: 0, missed: 0 };
+      res.json({
+        profiles: list
+          .map((p) => ({
+            discord_id: p.discord_id,
+            username: p.username,
+            avatar: p.avatar,
+            active: p.active,
+            staff_paused: !!p.staff_paused,
+            staff_paused_reason: p.staff_paused_reason,
+            staff_paused_by: p.staff_paused_by,
+            staff_paused_at: p.staff_paused_at,
+            in_pool: inPool(p),
+            role: p.role,
+            classes: p.classes,
+            gear: p.gear,
+            timezone: p.timezone,
+            windows: p.windows,
+            notes: p.notes,
+            home_guild: idx.brief(p.home_guild_id),
+            avoid_guilds: (p.avoid_guild_ids || []).map((id) => idx.brief(id)).filter(Boolean),
+            guild_hall: (p.gh_guild_ids || []).length > 0,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+            stats: stats.get(p.discord_id) || none,
+          }))
+          .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)),
+      });
+    } catch (e) {
+      console.error('fills /staff/pool:', e.message);
+      res.status(500).json({ error: 'Could not load the player pool.' });
+    }
+  });
+
+  router.post('/staff/pool/:discordId/pause', staffOnly, async (req, res) => {
+    try {
+      const reason = String(req.body?.reason || '').trim().slice(0, 300);
+      if (!reason) throw new Error('Give a reason — the player sees it.');
+      const { data, error } = await profiles().update({
+        staff_paused: true,
+        staff_paused_reason: reason,
+        staff_paused_by: `${req.user.username || 'staff'} (${req.user.id})`,
+        staff_paused_at: new Date().toISOString(),
+      }).eq('discord_id', req.params.discordId).select().maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return res.status(404).json({ error: 'Profile not found.' });
+      res.json({ ok: true });
+      notify(data.discord_id, `⏸️ Guild Hall staff paused your fill listing: ${reason}\n`
+        + 'Leaders can no longer find you in the pool. Invites you already have still work. '
+        + 'Ask in the Guild Hall Discord if you think this is a mistake.');
+    } catch (e) {
+      if (!res.headersSent) fail(res, e, 'Could not pause that listing.');
+    }
+  });
+
+  router.delete('/staff/pool/:discordId/pause', staffOnly, async (req, res) => {
+    try {
+      const { data, error } = await profiles().update({
+        staff_paused: false, staff_paused_reason: null, staff_paused_by: null, staff_paused_at: null,
+      }).eq('discord_id', req.params.discordId).eq('staff_paused', true).select().maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return res.status(409).json({ error: 'That listing is not paused by staff.' });
+      res.json({ ok: true });
+      notify(data.discord_id, data.active
+        ? '▶️ Guild Hall staff lifted the pause on your fill listing. Leaders can find you again.'
+        : '▶️ Guild Hall staff lifted the pause on your fill listing. Turn "Listed" back on when you want leaders to find you.');
+    } catch (e) {
+      if (!res.headersSent) fail(res, e, 'Could not lift the pause.');
+    }
+  });
+
   return { router };
 };
 
 module.exports.__test = {
   validTimezone, localParts, isAvailable, conflictFor, overlaps, cleanSlots, cleanProfile, leaderGuilds,
+  inPool, inviteStats,
 };

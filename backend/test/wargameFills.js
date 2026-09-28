@@ -4,7 +4,7 @@
 // because a timezone was read the wrong way round), so they are pinned here.
 const assert = require('assert');
 const {
-  isAvailable, conflictFor, overlaps, cleanSlots, cleanProfile, leaderGuilds, localParts,
+  isAvailable, conflictFor, overlaps, cleanSlots, cleanProfile, leaderGuilds, localParts, inPool, inviteStats,
 } = require('../wargameFills').__test;
 
 let passed = 0;
@@ -99,6 +99,21 @@ test('guild leaders and `fills` holders may post; plain members may not', () => 
   ];
   assert.deepStrictEqual(leaderGuilds({ guilds }).map((g) => g.guild_id), ['a', 'b']);
   assert.deepStrictEqual(leaderGuilds({ guilds: [] }), []);
+});
+
+console.log('staff moderation');
+test('a listed profile is in the pool', () => assert.ok(inPool({ active: true, staff_paused: false })));
+test('a profile the player paused is not', () => assert.ok(!inPool({ active: false, staff_paused: false })));
+test('a staff pause wins over the player\'s own switch', () => assert.ok(!inPool({ active: true, staff_paused: true })));
+test('a profile from before saas_010 (no column) still counts as listed', () => assert.ok(inPool({ active: true })));
+test('invite answers are counted per player', () => {
+  const s = inviteStats([
+    { discord_id: 'a', status: 'accepted' }, { discord_id: 'a', status: 'missed' },
+    { discord_id: 'a', status: 'accepted' }, { discord_id: 'b', status: 'declined' },
+  ]);
+  assert.deepStrictEqual(s.get('a'), { invited: 0, accepted: 2, declined: 0, withdrawn: 0, missed: 1 });
+  assert.strictEqual(s.get('b').declined, 1);
+  assert.strictEqual(s.get('c'), undefined);
 });
 
 console.log(`\n${passed} passed`);

@@ -10,6 +10,7 @@ import FillRequests from './FillRequests';
 import FillRequestDetail from './FillRequestDetail';
 import LeaderClaim from './LeaderClaim';
 import StaffClaims from './StaffClaims';
+import StaffPool from './StaffPool';
 import { useFillsMe } from './shared';
 
 // merc.guild-hall.gg — the wargame fill pool as its own site.
@@ -67,7 +68,11 @@ function Shell({ children, me }) {
     { to: '/invites', label: 'Invites' },
     { to: '/requests', label: 'Fill requests' },
     { to: '/leader', label: 'Leader status' },
-    ...(me?.staff ? [{ to: '/staff', label: 'Leader claims' }] : []),
+    // `end` on claims: without it /staff would also light up on /staff/pool.
+    ...(me?.staff ? [
+      { to: '/staff', label: 'Leader claims', end: true },
+      { to: '/staff/pool', label: 'Player pool' },
+    ] : []),
   ];
   return (
     <div className="min-h-screen bg-ink text-bone flex flex-col shell-vignette">
@@ -131,6 +136,7 @@ function SignedIn() {
         <Route path="/requests/:id" element={<PageShell><FillRequestDetail base="/requests" /></PageShell>} />
         <Route path="/leader" element={<Page eyebrow="Leaders" title="Verify that you lead your guild"><LeaderClaim me={me} onSaved={reload} /></Page>} />
         {me.staff && <Route path="/staff" element={<Page eyebrow="Guild Hall staff" title="Leader claims"><StaffClaims /></Page>} />}
+        {me.staff && <Route path="/staff/pool" element={<Page eyebrow="Guild Hall staff" title="Player pool"><StaffPool /></Page>} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

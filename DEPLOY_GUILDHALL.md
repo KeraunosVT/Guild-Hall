@@ -264,7 +264,8 @@ Future updates: commit+sync in VS Code →
 The fill pool is the same app on a second host — no new service, no new port.
 
 1. **Database:** SQL Editor → run `migrations/saas_009_wargame_fills.sql`
-   (after saas_008). Run it on the test project too.
+   (after saas_008), then `saas_010_fill_staff_moderation.sql`. Run both on
+   the test project too.
 2. **DNS (Namecheap → Advanced DNS):** add an **A Record**, host `merc`,
    value YOUR_DROPLET_IP.
 3. **Discord Developer Portal → the Guild Hall application → OAuth2 →
