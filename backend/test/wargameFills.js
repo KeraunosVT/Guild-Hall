@@ -5,6 +5,7 @@
 const assert = require('assert');
 const {
   isAvailable, conflictFor, overlaps, cleanSlots, cleanProfile, leaderGuilds, localParts, inPool, inviteStats,
+  approvedLeaders, MAX_GUILD_LEADERS,
 } = require('../wargameFills').__test;
 
 let passed = 0;
@@ -114,6 +115,22 @@ test('invite answers are counted per player', () => {
   assert.deepStrictEqual(s.get('a'), { invited: 0, accepted: 2, declined: 0, withdrawn: 0, missed: 1 });
   assert.strictEqual(s.get('b').declined, 1);
   assert.strictEqual(s.get('c'), undefined);
+});
+
+console.log('guild leader limit');
+test('a guild may have two verified leaders', () => assert.strictEqual(MAX_GUILD_LEADERS, 2));
+test('only verified leaders of that guild count, not the claimant', () => {
+  const rows = [
+    { discord_id: 'a', threat_guild_id: 'G', status: 'approved' },
+    { discord_id: 'b', threat_guild_id: 'G', status: 'pending' },
+    { discord_id: 'c', threat_guild_id: 'G', status: 'rejected' },
+    { discord_id: 'd', threat_guild_id: 'H', status: 'approved' },
+    { discord_id: 'e', threat_guild_id: 'G', status: 'approved' },
+  ];
+  assert.strictEqual(approvedLeaders(rows, 'G', 'b'), 2); // b would be a third
+  assert.strictEqual(approvedLeaders(rows, 'G', 'a'), 1); // a re-approved isn't a third
+  assert.strictEqual(approvedLeaders(rows, 'H', 'x'), 1);
+  assert.strictEqual(approvedLeaders([], 'G', 'x'), 0);
 });
 
 console.log(`\n${passed} passed`);

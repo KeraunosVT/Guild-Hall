@@ -52,6 +52,12 @@ export default function LeaderClaim({ me, onSaved }) {
             <dt className="text-ash">Guild</dt><dd><GuildName guild={claim.guild} /></dd>
             <dt className="text-ash">Status</dt><dd><Pill tone={STATUS[claim.status].tone}>{STATUS[claim.status].label}</Pill></dd>
             <dt className="text-ash">How to confirm</dt><dd>{claim.proof || '—'}</dd>
+            <dt className="text-ash">Other leaders</dt>
+            <dd>
+              {claim.coLeaders?.length
+                ? claim.coLeaders.map((c) => `${c.username} (${c.status === 'approved' ? 'verified' : 'waiting for staff'})`).join(', ')
+                : <span className="text-ash">None yet. A guild can have {claim.maxLeaders || 2} verified leaders, who share its fill requests.</span>}
+            </dd>
           </dl>
           <p className="text-xs text-ash">
             {claim.status === 'approved' && 'Players see “Verified leader” on your invites.'}

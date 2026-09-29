@@ -129,6 +129,7 @@ const wargameFills = threatBoard
     // New and changed leader claims are posted for staff to review. Guild Hall
     // staff config, like GUILD_HALL_STAFF_* — not any tenant's channel.
     notifyStaff: (message) => gateway.postToChannel(process.env.FILLS_STAFF_CHANNEL_ID, message),
+    lookupUser: gateway.lookupUser,
   })
   : null;
 const gearIlvl = supabase ? createGearIlvl(supabase) : null;

@@ -1571,11 +1571,24 @@ async function postToChannel(channelId, message) {
   }
 }
 
+// A Discord user's display name by id, or null when the bot is offline or no
+// such user exists. Any user, not only people in a server the bot is in — so a
+// staff member can check they typed the right id before granting it anything.
+async function lookupUser(userId) {
+  if (!ready || !client || !userId) return null;
+  try {
+    const user = await client.users.fetch(String(userId));
+    return { id: user.id, username: user.globalName || user.username, bot: !!user.bot };
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
   notifyLateAttendance,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
-  sendDirectMessage, postToChannel,
+  sendDirectMessage, postToChannel, lookupUser,
 };
 
 // ── Test seam ───────────────────────────────────────────────────────────────

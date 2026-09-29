@@ -38,6 +38,10 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const MAX_SLOTS_PER_ROLE = 30;
 const MAX_WINDOWS = 21;
 const MAX_AVOID = 25;
+// Verified leaders per guild outside Guild Hall — a leader and a second. Also
+// enforced by a trigger (migrations/saas_012), which is what holds when two
+// staff approve at once.
+const MAX_GUILD_LEADERS = 2;
 // A request's page stays readable for a while after the wargame starts, so a
 // leader can see who turned up; after that it drops out of every list.
 const KEEP_AFTER_START_MS = 12 * 60 * 60 * 1000;
@@ -175,6 +179,12 @@ function inPool(profile) {
   return !!profile && profile.active === true && profile.staff_paused !== true;
 }
 
+// How many OTHER verified leaders a guild has, from a list of claim rows.
+function approvedLeaders(rows, guildId, excludeDiscordId) {
+  return (rows || []).filter((c) => c.threat_guild_id === guildId && c.status === 'approved'
+    && c.discord_id !== excludeDiscordId).length;
+}
+
 // Answers per status for each player, from a list of invite rows.
 function inviteStats(rows) {
   const out = new Map();
@@ -198,6 +208,7 @@ const unix = (iso) => Math.floor(new Date(iso).getTime() / 1000);
 
 module.exports = function createWargameFills(supabase, {
   requireAuth, threatBoard, notify = async () => false, notifyStaff = async () => false,
+  lookupUser = async () => null,
 }) {
   const profiles = () => supabase.from('fill_profiles');
   const claims = () => supabase.from('fill_leader_claims');
@@ -252,10 +263,33 @@ module.exports = function createWargameFills(supabase, {
     };
   }
 
+  // The guild this session leads through a VERIFIED claim, if any. Only a
+  // verified leader shares the guild's requests: a pending claim is someone
+  // staff haven't checked, and must not see or change what the real leaders
+  // posted.
+  const verifiedClaimGuild = (leader) => (leader.claim && leader.claim.status === 'approved'
+    ? leader.claim.threat_guild_id : null);
+
   function canManage(user, leader, request) {
     if (request.leader_id === user.id) return true;
-    return !!request.guild_id && leader.guilds.some((g) => g.guild_id === request.guild_id);
+    if (request.guild_id && leader.guilds.some((g) => g.guild_id === request.guild_id)) return true;
+    // The other verified leader of the same outside guild.
+    return !!request.claim_guild_id && request.claim_guild_id === verifiedClaimGuild(leader);
   }
+
+  // Everyone else claiming the same guild, for the leader page and the staff
+  // queue. Rejected claims are left out: they lead nothing.
+  async function claimsForGuild(guildId) {
+    const { data, error } = await claims().select('discord_id, username, status, threat_guild_id')
+      .eq('threat_guild_id', guildId);
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
+  // The database trigger's error, as a sentence a leader or staff can act on.
+  const limitMessage = (guildName) => `${guildName || 'That guild'} already has ${MAX_GUILD_LEADERS} verified leaders. `
+    + 'Staff can reject or undo one of them to make room.';
+  const isLimitError = (msg) => /LEADER_LIMIT/.test(msg || '');
 
   // Verified = posted for a Guild Hall guild (the poster held `fills` there,
   // which was checked at posting), or posted under a claim staff approved.
@@ -352,7 +386,14 @@ module.exports = function createWargameFills(supabase, {
         leader: {
           canLead: leader.canLead,
           guilds: leader.guilds.map((g) => ({ guild_id: g.guild_id, house: g.house, tag: g.tag })),
-          claim: leader.claim ? { ...leader.claim, guild: idx.brief(leader.claim.threat_guild_id) } : null,
+          claim: leader.claim ? {
+            ...leader.claim,
+            guild: idx.brief(leader.claim.threat_guild_id),
+            maxLeaders: MAX_GUILD_LEADERS,
+            coLeaders: (await claimsForGuild(leader.claim.threat_guild_id))
+              .filter((c) => c.discord_id !== req.user.id && c.status !== 'rejected')
+              .map((c) => ({ username: c.username, status: c.status })),
+          } : null,
         },
         staff: !!req.user.staff,
         mercUrl: sites.mercUrl('/'),
@@ -511,13 +552,17 @@ module.exports = function createWargameFills(supabase, {
       // Two reads merged rather than one .or(): the ids would otherwise be
       // interpolated into a filter string.
       const guildIds = leader.guilds.map((g) => g.guild_id);
-      const [own, shared] = await Promise.all([
+      const claimGuild = verifiedClaimGuild(leader);
+      const [own, shared, coLed] = await Promise.all([
         requests().select('*').eq('leader_id', req.user.id).gte('starts_at', since),
         guildIds.length
           ? requests().select('*').in('guild_id', guildIds).gte('starts_at', since)
           : Promise.resolve({ data: [] }),
+        claimGuild
+          ? requests().select('*').eq('claim_guild_id', claimGuild).gte('starts_at', since)
+          : Promise.resolve({ data: [] }),
       ]);
-      const byId = new Map([...(own.data || []), ...(shared.data || [])].map((r) => [r.id, r]));
+      const byId = new Map([...(own.data || []), ...(shared.data || []), ...(coLed.data || [])].map((r) => [r.id, r]));
       const list = [...byId.values()].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
       const [idx, isVerified, filled] = await Promise.all([
         boardIndex(), verifiedLeaders(list), filledCounts(list.map((r) => r.id)),
@@ -743,6 +788,14 @@ module.exports = function createWargameFills(supabase, {
       if (current && current.status === 'approved' && current.threat_guild_id === guildId) {
         return res.json({ claim: current });
       }
+      // Refused up front rather than accepted as pending: staff could never
+      // approve it, and the leader should hear why now, not after a wait.
+      if (approvedLeaders(await claimsForGuild(guildId), guildId, req.user.id) >= MAX_GUILD_LEADERS) {
+        return res.status(409).json({
+          error: `${idx.brief(guildId)?.name || 'That guild'} already has ${MAX_GUILD_LEADERS} verified leaders. `
+            + 'If you lead it too, ask Guild Hall staff in the Discord.',
+        });
+      }
       const { data, error } = await claims().upsert({
         discord_id: req.user.id,
         username: req.user.username || 'Leader',
@@ -783,7 +836,10 @@ module.exports = function createWargameFills(supabase, {
       // Logged as well as returned: a claim that fails leaves nothing behind
       // in the database, so the log is the only trace staff can look for.
       console.error(`fills claim failed for ${req.user?.id}:`, e.message);
-      if (!res.headersSent) fail(res, e, 'Could not save your claim.');
+      if (res.headersSent) return;
+      // The trigger (saas_012) lost a race the check above didn't see.
+      if (isLimitError(e.message)) return res.status(409).json({ error: limitMessage() });
+      fail(res, e, 'Could not save your claim.');
     }
   });
 
@@ -805,10 +861,74 @@ module.exports = function createWargameFills(supabase, {
         boardIndex(),
       ]);
       if (error) throw new Error(error.message);
-      res.json({ claims: (data || []).map((c) => ({ ...c, guild: idx.brief(c.threat_guild_id) })) });
+      res.json({
+        maxLeaders: MAX_GUILD_LEADERS,
+        claims: (data || []).map((c) => ({
+          ...c,
+          guild: idx.brief(c.threat_guild_id),
+          // Verified leaders the guild has besides this claimant.
+          otherApproved: approvedLeaders(data, c.threat_guild_id, c.discord_id),
+        })),
+      });
     } catch (e) {
       console.error('fills /claims:', e.message);
       res.status(500).json({ error: 'Could not load leader claims.' });
+    }
+  });
+
+  // Staff add a leader directly, already verified: for a leader who told staff
+  // in Discord rather than sending a claim, or whose claim went wrong. Keyed by
+  // Discord user id, so it takes effect the moment that person signs in on
+  // merc — they don't need to have signed in before.
+  router.post('/claims', staffOnly, async (req, res) => {
+    try {
+      const discordId = String(req.body?.discord_id || '').trim();
+      const guildId = req.body?.threat_guild_id;
+      if (!/^\d{17,20}$/.test(discordId)) {
+        throw new Error('That isn\'t a Discord user ID. In Discord, turn on Developer Mode, right-click the person and choose Copy User ID.');
+      }
+      const idx = await boardIndex();
+      if (!UUID.test(guildId || '') || !idx.known(guildId)) throw new Error('Pick their guild from the threat board.');
+
+      // The bot confirms the id is a real account and supplies the name, so a
+      // typo'd id doesn't become a verified leader nobody can ever be.
+      const found = await lookupUser(discordId);
+      if (found && found.bot) throw new Error('That ID belongs to a bot.');
+      const typed = String(req.body?.username || '').trim().slice(0, 80);
+      const username = found?.username || typed;
+      if (!username) {
+        throw new Error('The bot couldn\'t look that ID up right now, so type their Discord name as well.');
+      }
+
+      const guildName = idx.brief(guildId)?.name;
+      if (approvedLeaders(await claimsForGuild(guildId), guildId, discordId) >= MAX_GUILD_LEADERS) {
+        return res.status(409).json({ error: limitMessage(guildName) });
+      }
+
+      const current = await claimOf(discordId);
+      const staffName = `${req.user.username || 'staff'} (${req.user.id})`;
+      const { data, error } = await claims().upsert({
+        discord_id: discordId,
+        username,
+        threat_guild_id: guildId,
+        // Kept when they had already written one; otherwise say where it came from.
+        proof: current?.proof && current.threat_guild_id === guildId
+          ? current.proof : `Added by Guild Hall staff (${req.user.username || 'staff'})`,
+        status: 'approved',
+        decided_by: staffName,
+        decided_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).select().single();
+      if (error) throw new Error(error.message);
+      res.status(201).json({ claim: { ...data, guild: idx.brief(guildId) }, verifiedName: !!found, replaced: current || null });
+
+      const link = sites.mercUrl('/requests');
+      notify(discordId, `✅ Guild Hall staff added you as a verified leader of **${guildName || 'your guild'}** on the fill pool.`
+        + (link ? `\nPost a fill request and invite players: ${link}` : ''));
+    } catch (e) {
+      if (res.headersSent) return;
+      if (isLimitError(e.message)) return res.status(409).json({ error: limitMessage() });
+      fail(res, e, 'Could not add that leader.');
     }
   });
 
@@ -816,6 +936,14 @@ module.exports = function createWargameFills(supabase, {
     try {
       const status = req.body?.status;
       if (!['approved', 'rejected', 'pending'].includes(status)) throw new Error('Unknown decision.');
+      if (status === 'approved') {
+        const target = await claimOf(req.params.discordId);
+        if (target && approvedLeaders(await claimsForGuild(target.threat_guild_id), target.threat_guild_id, target.discord_id)
+          >= MAX_GUILD_LEADERS) {
+          const idx0 = await boardIndex();
+          return res.status(409).json({ error: limitMessage(idx0.brief(target.threat_guild_id)?.name) });
+        }
+      }
       const { data, error } = await claims().update({
         status,
         decided_by: status === 'pending' ? null : `${req.user.username || 'staff'} (${req.user.id})`,
@@ -834,7 +962,9 @@ module.exports = function createWargameFills(supabase, {
           : `Guild Hall staff could not verify you as a leader of **${guild}**. Reply in the Guild Hall Discord if you think that's wrong.`);
       }
     } catch (e) {
-      if (!res.headersSent) fail(res, e, 'Could not record the decision.');
+      if (res.headersSent) return;
+      if (isLimitError(e.message)) return res.status(409).json({ error: limitMessage() });
+      fail(res, e, 'Could not record the decision.');
     }
   });
 
@@ -925,6 +1055,7 @@ module.exports = function createWargameFills(supabase, {
 };
 
 module.exports.__test = {
+  approvedLeaders, MAX_GUILD_LEADERS,
   validTimezone, localParts, isAvailable, conflictFor, overlaps, cleanSlots, cleanProfile, leaderGuilds,
   inPool, inviteStats,
 };
