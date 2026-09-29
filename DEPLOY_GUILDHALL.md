@@ -275,6 +275,9 @@ The fill pool is the same app on a second host — no new service, no new port.
 
 ```bash
 MERC_ORIGIN=https://merc.guild-hall.gg
+# Where new leader claims are posted for staff. The bot must be able to see
+# and send in this channel.
+FILLS_STAFF_CHANNEL_ID=1554311024004571287
 ```
 
 5. **Caddy:** add a block to `/etc/caddy/Caddyfile` — same port as the main

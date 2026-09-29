@@ -196,7 +196,9 @@ const unix = (iso) => Math.floor(new Date(iso).getTime() / 1000);
 
 // ── Module ──────────────────────────────────────────────────────────────────
 
-module.exports = function createWargameFills(supabase, { requireAuth, threatBoard, notify = async () => false }) {
+module.exports = function createWargameFills(supabase, {
+  requireAuth, threatBoard, notify = async () => false, notifyStaff = async () => false,
+}) {
   const profiles = () => supabase.from('fill_profiles');
   const claims = () => supabase.from('fill_leader_claims');
   const requests = () => supabase.from('fill_requests');
@@ -755,8 +757,33 @@ module.exports = function createWargameFills(supabase, { requireAuth, threatBoar
       }).select().single();
       if (error) throw new Error(error.message);
       res.json({ claim: data });
+
+      // Tell staff there's something to review. After the response, and never
+      // allowed to fail the claim: it is saved either way.
+      const g = idx.brief(guildId);
+      const link = sites.mercUrl('/staff');
+      notifyStaff({
+        embeds: [{
+          title: current ? 'Leader claim updated' : 'New leader claim',
+          color: 0xc9973a,
+          fields: [
+            { name: 'Leader', value: `<@${req.user.id}> (${req.user.username || 'unknown'})`, inline: true },
+            { name: 'Guild', value: g ? `${g.name} · ${g.cluster} · ${g.status}` : 'Unknown guild', inline: true },
+            { name: 'How to confirm', value: data.proof || '—' },
+            ...(current && current.threat_guild_id !== guildId
+              ? [{ name: 'Previously', value: `${idx.brief(current.threat_guild_id)?.name || 'another guild'} (${current.status})` }]
+              : current ? [{ name: 'Previously', value: `Same guild, ${current.status}` }] : []),
+          ],
+          description: link ? `Review it on [Leader claims](${link}).` : 'Review it on merc under Leader claims.',
+          footer: { text: `Discord ID ${req.user.id}` },
+          timestamp: new Date().toISOString(),
+        }],
+      }).catch(() => {});
     } catch (e) {
-      fail(res, e, 'Could not save your claim.');
+      // Logged as well as returned: a claim that fails leaves nothing behind
+      // in the database, so the log is the only trace staff can look for.
+      console.error(`fills claim failed for ${req.user?.id}:`, e.message);
+      if (!res.headersSent) fail(res, e, 'Could not save your claim.');
     }
   });
 

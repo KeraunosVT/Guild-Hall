@@ -122,7 +122,14 @@ const threatBoard = supabase ? createThreatBoard(supabase) : null;
 // DMs through the gateway — best-effort, since a bot can only DM people it
 // shares a server with.
 const wargameFills = threatBoard
-  ? createWargameFills(supabase, { requireAuth, threatBoard, notify: gateway.sendDirectMessage })
+  ? createWargameFills(supabase, {
+    requireAuth,
+    threatBoard,
+    notify: gateway.sendDirectMessage,
+    // New and changed leader claims are posted for staff to review. Guild Hall
+    // staff config, like GUILD_HALL_STAFF_* — not any tenant's channel.
+    notifyStaff: (message) => gateway.postToChannel(process.env.FILLS_STAFF_CHANNEL_ID, message),
+  })
   : null;
 const gearIlvl = supabase ? createGearIlvl(supabase) : null;
 const identities = supabase ? createIdentities(supabase) : null;

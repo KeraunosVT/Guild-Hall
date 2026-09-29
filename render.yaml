@@ -74,3 +74,5 @@ services:
       # host; the fill pages still live inside the guild app.
       - key: MERC_ORIGIN
         sync: false # e.g. https://merc.guild-hall.gg
+      - key: FILLS_STAFF_CHANNEL_ID
+        sync: false # Discord channel where new leader claims are posted for staff

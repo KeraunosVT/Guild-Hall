@@ -1548,11 +1548,34 @@ async function sendDirectMessage(userId, content) {
   }
 }
 
+// One message to a channel by id, best-effort. Returns whether it was sent.
+//
+// For Guild Hall's own channels (the staff queue for fill-pool leader claims),
+// not any tenant's: the channel id comes from deployment config, never from a
+// guilds row. Fetched rather than read from cache so it works for a channel in
+// any server the bot is in. Mentions are disabled — the content carries names
+// other people typed — so a <@id> still renders as a name but pings nobody.
+async function postToChannel(channelId, message) {
+  if (!ready || !client || !channelId || !message) return false;
+  try {
+    const channel = await client.channels.fetch(String(channelId));
+    if (!channel?.isTextBased()) {
+      console.error(`postToChannel: ${channelId} is not a text channel the bot can see.`);
+      return false;
+    }
+    await channel.send({ ...message, allowedMentions: { parse: [] } });
+    return true;
+  } catch (err) {
+    console.error(`postToChannel ${channelId} failed:`, err.message);
+    return false;
+  }
+}
+
 module.exports = {
   start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
   notifyLateAttendance,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
-  sendDirectMessage,
+  sendDirectMessage, postToChannel,
 };
 
 // ── Test seam ───────────────────────────────────────────────────────────────
