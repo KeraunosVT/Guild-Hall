@@ -15,6 +15,10 @@ export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // what their guild profile says.
 export const CLASS_LIST = [...new Set([...Object.values(weaponToClass), 'Oracle (DPS)', 'Seeker (DPS)'])].sort();
 
+// The Discord players are pointed to from the fill pages — for questions,
+// finding a group, or a listing staff have paused.
+export const DISCORD_INVITE = 'https://discord.gg/Bx4gXYB2uk';
+
 export const inputClass = 'w-full bg-hall border border-line rounded-lg px-3 py-2 text-bone focus:outline-none focus:border-brass disabled:opacity-60';
 export const labelClass = 'eyebrow text-[10px] text-ash block mb-1.5';
 

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, MessageSquare } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Toast from '../../components/ui/Toast';
 import { useFlash } from '../../components/ui/useFlash';
 import { TIMEZONE_OPTIONS } from '../../timeUtils';
 import {
   ROLES, WEEKDAYS, CLASS_LIST, inputClass, labelClass, errorOf, browserTimezone,
-  useThreatGuilds, GuildOptions, GuildName,
+  useThreatGuilds, GuildOptions, GuildName, DISCORD_INVITE,
 } from './shared';
 
 // A player's listing in the fill pool. Everything here is what a leader sees
@@ -78,7 +78,9 @@ export default function FillProfile({ me, onSaved }) {
           <div>{me.profile.staff_paused_reason}</div>
           <div className="text-ash text-xs">
             Leaders can&apos;t find you until staff lift it, whatever your Listed switch says. Invites you already have still work.
-            Ask in the Guild Hall Discord if you think this is a mistake.
+            Ask in the{' '}
+            <a href={DISCORD_INVITE} target="_blank" rel="noopener noreferrer" className="text-brass hover:text-brassbright underline underline-offset-4">Discord</a>
+            {' '}if you think this is a mistake.
           </div>
         </div>
       )}
@@ -218,9 +220,16 @@ export default function FillProfile({ me, onSaved }) {
         </section>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Button onClick={() => save()} disabled={saving}>{saving ? 'Saving…' : listed ? 'Save profile' : 'List me as a fill'}</Button>
         <span className="text-xs text-ash">Leaders see your Discord name and avatar.</span>
+        <a
+          href={DISCORD_INVITE} target="_blank" rel="noopener noreferrer"
+          className="sm:ml-auto inline-flex items-center gap-1.5 text-sm text-brass hover:text-brassbright transition-colors"
+        >
+          <MessageSquare className="w-4 h-4" />
+          Join the Discord
+        </a>
       </div>
     </div>
   );
