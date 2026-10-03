@@ -11,6 +11,9 @@ const CATEGORIES = [
   { main: 'armor', sub: '' },
   { main: 'accessories', sub: '' },
   { main: 'misc', sub: 'perk', filter: (it) => it.id.startsWith('Perk_EA') },
+  // Trait enchant stones. Not returned by an unfiltered misc listing — the
+  // subcategory has to be asked for by name.
+  { main: 'misc', sub: 'traitenchantpoint' },
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -59,13 +62,20 @@ async function downloadAndUploadIcon(supabase, itemId, iconPath) {
   }
 }
 
+// Questlog moved traits and resonance inside itemStats (itemStats.traits,
+// .resonance, .uniqueTraits), and renamed passiveAbility to `passives` with the
+// description under `text`. The stored shape stays what ItemTooltip reads.
+function normalizePassive(p) {
+  const first = Array.isArray(p) ? p[0] : p;
+  if (!first) return null;
+  return { name: first.name || null, description: first.text || first.description || null };
+}
+
 function trimDetail(d) {
   if (!d) return null;
   return {
     itemStats: d.itemStats || null,
-    itemTraits: d.itemTraits || null,
-    resonance: d.resonance || null,
-    passiveAbility: d.passiveAbility || null,
+    passiveAbility: normalizePassive(d.passives) || d.passiveAbility || null,
     activeAbility: d.activeAbility || null,
   };
 }
