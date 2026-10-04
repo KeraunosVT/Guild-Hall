@@ -52,6 +52,7 @@ export default function Admin() {
   const [matchDate, setMatchDate] = useState('');
   const [result, setResult] = useState('');
   const [map, setMap] = useState('');
+  const [notes, setNotes] = useState('');
   const [maps, setMaps] = useState([]);
   const [showMapAdmin, setShowMapAdmin] = useState(false);
   const [newMapName, setNewMapName] = useState('');
@@ -111,6 +112,7 @@ export default function Admin() {
         setMatchDate(m.match_date ? m.match_date.slice(0, 10) : '');
         setResult(m.result || '');
         setMap(m.map || '');
+        setNotes(m.notes || '');
         setPlayers(res.data.players || []);
         setWarnings([]);
         setDone(null);
@@ -208,12 +210,12 @@ export default function Admin() {
     try {
       let res;
       if (editingMatchId) {
-        res = await axios.put(`/api/admin/match/${editingMatchId}`, { title, match_date: matchDate, result, map, players });
+        res = await axios.put(`/api/admin/match/${editingMatchId}`, { title, match_date: matchDate, result, map, notes, players });
       } else {
-        res = await axios.post('/api/admin/match/commit', { title, match_date: matchDate, result, map, players });
+        res = await axios.post('/api/admin/match/commit', { title, match_date: matchDate, result, map, notes, players });
       }
       setDone(editingMatchId ? { ...res.data, edited: true } : res.data);
-      setPlayers(null); setItems([]); setTitle(''); setMatchDate(''); setResult(''); setMap(''); setWarnings([]);
+      setPlayers(null); setItems([]); setTitle(''); setMatchDate(''); setResult(''); setMap(''); setNotes(''); setWarnings([]);
       if (editingMatchId) {
         setEditingMatchId(null);
         setSearchParams({});
@@ -407,6 +409,7 @@ export default function Admin() {
                 {maps.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
               </select>
             </div>
+            <NotesField value={notes} onChange={setNotes} />
             <div className="space-y-2">
               {items.some((it) => it.status === 'idle') && (
                 <button
@@ -484,6 +487,9 @@ export default function Admin() {
                   <option value="">— set map —</option>
                   {maps.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
                 </select>
+              </div>
+              <div className="md:col-span-4">
+                <NotesField value={notes} onChange={setNotes} />
               </div>
             </div>
           )}
@@ -571,7 +577,7 @@ export default function Admin() {
             <button
               onClick={() => {
                 setPlayers(null); setWarnings([]);
-                if (editingMatchId) { setEditingMatchId(null); setSearchParams({}); setTitle(''); setMatchDate(''); setResult(''); setMap(''); }
+                if (editingMatchId) { setEditingMatchId(null); setSearchParams({}); setTitle(''); setMatchDate(''); setResult(''); setMap(''); setNotes(''); }
               }}
               className="px-6 py-3 text-ash hover:text-bone transition-colors"
             >
@@ -582,6 +588,22 @@ export default function Admin() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+// Shown on the war record right under the match date. The cap matches
+// MATCH_NOTES_MAX in backend/admin.js, which trims anything longer.
+function NotesField({ value, onChange }) {
+  return (
+    <div>
+      <label className="eyebrow text-[10px] text-ash block mb-1.5">Notes</label>
+      <textarea
+        value={value} onChange={(e) => onChange(e.target.value)}
+        rows={3} maxLength={2000}
+        placeholder="Optional — comp, calls, what went right or wrong"
+        className="w-full bg-panel border border-line rounded-lg px-3 py-2 text-bone focus:outline-none focus:border-brass resize-y"
+      />
+    </div>
   );
 }
 

@@ -305,11 +305,16 @@ export default function MatchStats() {
               </>
             )}
           </div>
-          <p className="text-ash mb-6">
+          <p className={`text-ash ${selectedMatch.notes ? 'mb-3' : 'mb-6'}`}>
             {new Date(selectedMatch.match_date + 'T12:00:00').toLocaleDateString('en-US', {
               weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
             })}
           </p>
+          {selectedMatch.notes && (
+            <p className="text-bone/90 text-sm leading-relaxed whitespace-pre-line border-l-2 border-brass/50 pl-3 mb-6 max-w-3xl">
+              {selectedMatch.notes}
+            </p>
+          )}
 
           {/* Team cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

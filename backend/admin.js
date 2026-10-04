@@ -103,6 +103,9 @@ const clean = (v) => {
   const s = String(v ?? '').trim();
   return s === '' ? null : s;
 };
+
+// War record notes are a few lines of context under the date, not a report.
+const MATCH_NOTES_MAX = 2000;
 const team = (v) => {
   const s = String(v || '').trim().toLowerCase();
   if (s.startsWith('r')) return 'Red';
@@ -1069,19 +1072,21 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   // Takes the guild-scoped client. It lives outside the route handlers, so
   // there is no `req` in scope to build one from — the bulk conversion wrote
   // dbFor(req) in here anyway and every match save died on "req is not defined".
-  async function saveMatch(db, matchId, { title, match_date, result, map, players }) {
+  async function saveMatch(db, matchId, { title, match_date, result, map, notes, players }) {
     const { data, error } = await db.rpc('save_match', {
       p_id: matchId,
       p_title: clean(title) || 'Wargame',
       p_match_date: clean(match_date),
       p_result: clean(result),
       p_map: clean(map),
+      p_notes: clean(notes)?.slice(0, MATCH_NOTES_MAX) ?? null,
       p_players: players.map(playerRow),
     });
     if (error) {
       // Most likely cause on first deploy: the migration hasn't been run yet.
-      if (/function .*save_match.* does not exist/i.test(error.message)) {
-        throw new Error('save_match() is missing — run migrations/001_atomic_match_save.sql in Supabase.');
+      // p_notes arrived with saas_013, so an older save_match also lands here.
+      if (/function .*save_match.* does not exist|could not find the function .*save_match/i.test(error.message)) {
+        throw new Error('save_match() is missing or out of date — run migrations/saas_013_match_notes.sql in Supabase.');
       }
       throw new Error(error.message);
     }
