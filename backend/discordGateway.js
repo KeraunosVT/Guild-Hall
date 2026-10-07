@@ -1119,6 +1119,9 @@ function signupComponents(view) {
     new ButtonBuilder().setCustomId(`signup:join:${view.id}`).setLabel("I'm in").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`signup:leave:${view.id}`).setLabel('Withdraw').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`signup:who:${view.id}`).setLabel("Who's coming?").setStyle(ButtonStyle.Secondary),
+    // Not a Link-style button: Discord renders those grey, and this one is meant
+    // to stand out. The click replies privately with the link instead.
+    new ButtonBuilder().setCustomId(`signup:loa:${view.id}`).setLabel('LOA').setStyle(ButtonStyle.Danger),
   )];
 }
 
@@ -1257,10 +1260,20 @@ async function editSignupMessage(guildHall, signupId) {
 }
 
 // ── Button handling ───────────────────────────────────────────────────────
+const LOA_URL = 'https://guild-hall.gg/loa';
+
 async function handleButton(interaction) {
   const [ns, action, signupId] = String(interaction.customId || '').split(':');
   if (ns !== 'signup') return;
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (action === 'loa') {
+    return interaction.editReply({
+      content: "Can't make it? File an LOA so officers can plan around it.",
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel('Open LOA page').setURL(LOA_URL).setStyle(ButtonStyle.Link),
+      )],
+    }).catch(() => {});
+  }
   if (!signups) return interaction.editReply('Signups are not configured right now.');
   if (!signupId) return interaction.editReply('That button is missing its event — the post may be from an older version.');
 
