@@ -17,6 +17,11 @@ const SUITES = [
   ['wargame fill rules', 'wargameFills.js', false],
   // Crowns and new guilds, against an in-memory stand-in for the database.
   ['threat board editing', 'threatBoard.js', false],
+  // The per-guild ceiling on Gemini spend, against a fake clock.
+  ['gemini quota', 'geminiQuota.js', false],
+  // The Paddle webhook: signatures, reading the buyer, and answering so Paddle
+  // retries exactly the events we failed to apply.
+  ['billing webhook', 'billing.js', false],
   ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],
@@ -26,6 +31,10 @@ const SUITES = [
   // Same shape of question for late attendance: the 24-hour window, the
   // approve-once claim, and who owns a request. All of them fail silently.
   ['late attendance semantics', 'lateAttendance.js', true],
+  // Paid self-serve onboarding end to end: no seat no guild, one seat one
+  // guild (raced), the webhook's idempotency and ordering, lapse and recovery,
+  // and staff suspensions surviving a payment.
+  ['paid onboarding', 'onboarding.js', true],
 ];
 
 const needsDb = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);

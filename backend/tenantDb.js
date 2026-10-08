@@ -49,6 +49,11 @@ const GLOBAL_TABLES = new Set([
   'fill_leader_claims',
   'fill_requests',
   'fill_invites',
+  // Billing. Global because a paid seat exists before the guild it will
+  // become, so there's no guild_id to scope by. Only billing.js and
+  // onboarding.js touch these. See migrations/saas_014.
+  'subscriptions',
+  'billing_events',
 ]);
 
 function tenantDb(supabase, guildId) {

@@ -35,6 +35,7 @@ import GearLevels from './pages/GearLevels';
 import AuditLog from './pages/AuditLog';
 import GuildSettings from './pages/GuildSettings';
 import ThreatBoard from './pages/ThreatBoard';
+import Setup from './pages/Setup';
 import MercApp from './pages/fills/MercApp';
 import { FillsMemberPage, FillsAdminPage, FillsAdminDetail } from './pages/fills/GuildHallFills';
 
@@ -149,6 +150,9 @@ function App() {
                 is linkable by anyone. Keep it declared here rather than nesting
                 it below, or it silently becomes members-only. */}
             <Route path="/threat-board" element={<ThreatBoard />} />
+            {/* PUBLIC for the same reason: whoever is adding a guild has none
+                yet, so there is no session to gate on. See backend/onboarding.js. */}
+            <Route path="/setup" element={<Setup />} />
 
             <Route element={<Gate />}>
               <Route element={<Layout />}>

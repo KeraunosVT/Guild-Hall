@@ -7,6 +7,7 @@ import { fmtTimeEst, todayInGuildTz, eventsForGuildDay, isAfterMidnight } from '
 import ErrorState from '../components/ui/ErrorState';
 import StatTile from '../components/ui/StatTile';
 import ItemTooltip, { gradeStyle } from '../components/ItemTooltip';
+import SetupChecklist from '../components/SetupChecklist';
 
 // Pure calendar-date arithmetic, anchored to UTC throughout so it's immune to
 // the viewer's own browser timezone (see the LOA fmtTime bug this app used to
@@ -141,6 +142,8 @@ export default function Home() {
           </h1>
         </div>
       </section>
+
+      <SetupChecklist />
 
       {error ? (
         <div className="max-w-6xl mx-auto px-6 py-16">

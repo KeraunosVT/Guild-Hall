@@ -50,6 +50,8 @@ Do NOT run `000_baseline.sql` itself against your live database — it creates t
 
 ## Licensing note (AGPL-3.0)
 
+> **Superseded 2026-10-07:** the project is now licensed under FSL-1.1-MIT (see `LICENSE`). This section is kept as a historical record.
+
 - Guilds self-hosting **unmodified** copies have nothing to do — the source is already public (this repo).
 - A guild that **modifies** the code and runs it for their members must make their modified source available to those users (a "Source" link in the footer pointing at their fork is the conventional way to satisfy §13).
 - **You retain special power only while you own all the copyright.** Right now you can relicense, dual-license, or sell exceptions freely. Once you merge someone else's PR, the combined work is jointly owned and relicensing needs their consent too. If keeping that door open matters, either keep a simple CLA/DCO for contributors, or accept that the license is effectively permanent once contributions land — most projects just accept it.

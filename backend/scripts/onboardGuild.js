@@ -95,6 +95,15 @@ for (const f of ['roster_channel_id', 'loa_channel_id', 'announce_channel_id', '
   if (guild[f] && !snowflake.test(guild[f])) problems.push(`${f}: not a Discord id — ${guild[f]}`);
 }
 
+// The same field rules the Guild Settings page and self-serve onboarding apply,
+// so a hand-made guild can't hold a value the settings page would later refuse
+// to save. The checks above stay: this script is stricter (channels required).
+try {
+  require('../guildSettings').validateGuildFields(guild);
+} catch (err) {
+  problems.push(err.message);
+}
+
 if (problems.length) {
   console.error('Cannot onboard:\n' + problems.map((p) => '  - ' + p).join('\n'));
   process.exit(1);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Guild Hall — one home for your MMO guild</title>
-  <meta name="description" content="Rosters, attendance, gear, loot councils, and war stats for your MMO guild — with login through Discord. Free during early access." />
+  <meta name="description" content="Rosters, attendance, gear, loot councils, and war stats for your MMO guild — with login through Discord." />
   <meta property="og:title" content="Guild Hall" />
   <meta property="og:description" content="One home for your MMO guild: rosters, attendance, gear, loot, and war stats." />
   <meta property="og:type" content="website" />
@@ -190,20 +190,13 @@
       background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
       padding: 36px; max-width: 540px; margin: 0 auto;
     }
-    .field { margin-bottom: 16px; }
-    .field label { display: block; font-family: var(--font-display); font-weight: 500; font-size: 14px; margin-bottom: 7px; }
-    .field label .opt { color: var(--ash); font-weight: 400; }
-    .field input, .field textarea {
-      width: 100%; background: var(--ink); border: 1px solid var(--line);
-      border-radius: 10px; padding: 12px 14px; color: var(--bone);
-      font-family: var(--font-body); font-size: 15px; transition: border-color .15s ease;
-    }
-    .field input:focus, .field textarea:focus { outline: none; border-color: var(--brass); }
-    .field textarea { resize: vertical; min-height: 84px; }
     .form-card .btn-primary { width: 100%; justify-content: center; margin-top: 6px; font-size: 16px; padding: 13px; }
-    .form-msg { margin-top: 16px; text-align: center; font-size: 15px; min-height: 22px; }
-    .form-msg.ok { color: var(--brassbright); }
-    .form-msg.err { color: #ff8a8a; }
+    .form-card .opt { color: var(--ash); font-size: 14px; }
+    .price-line { margin-bottom: 6px; }
+    .price { font-family: var(--font-display); font-weight: 700; font-size: 34px; color: var(--brassbright); }
+    .price-list { list-style: none; padding: 0; margin: 18px 0 22px; }
+    .price-list li { padding: 7px 0 7px 26px; position: relative; color: var(--bone); }
+    .price-list li::before { content: "✓"; position: absolute; left: 0; color: var(--brassbright); }
 
     /* footer */
     footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 32px 0; }
@@ -251,7 +244,7 @@
           <a href="https://tourney.guild-hall.gg">Tourney</a>
         </div>
         <a href="/api/auth/login" class="btn btn-ghost" style="border-color:transparent;" data-member-link>Member login</a>
-        <a href="#early-access" class="btn btn-ghost nav-access">Request access</a>
+        <a href="/setup" class="btn btn-ghost nav-access">Add your guild</a>
       </div>
     </nav>
   </header>
@@ -259,14 +252,14 @@
   <main>
     <!-- HERO -->
     <section class="hero wrap">
-      <span class="eyebrow">Free during early access</span>
+      <span class="eyebrow" data-trial-eyebrow>For Throne &amp; Liberty guilds</span>
       <h1>One home for your<br><span class="accent">MMO guild.</span></h1>
       <p class="sub">Rosters, attendance, gear tracking, loot councils, and war stats — all in one place, with everyone logging in through Discord. Built by guild officers, for guild officers.</p>
       <div class="hero-cta">
-        <a href="#early-access" class="btn btn-primary">Request early access</a>
+        <a href="/setup" class="btn btn-primary">Add your guild</a>
         <a href="#screens" class="btn btn-ghost">See it in action</a>
       </div>
-      <p class="hero-note">No spreadsheets. No scattered bots. No monthly fee (for now).</p>
+      <p class="hero-note">No spreadsheets. No scattered bots. One price for your whole guild.</p>
     </section>
 
     <!-- FEATURES -->
@@ -390,29 +383,24 @@
       </div>
     </section>
 
-    <!-- EARLY ACCESS FORM -->
-    <section class="section wrap" id="early-access">
-      <h2>Request early access</h2>
-      <p class="lead">We're onboarding a small group of guilds first. Drop your Discord and we'll reach out.</p>
+    <!-- PRICING -->
+    <!-- The price and trial are read from /api/onboard/plan (which reads them
+         from the payment provider), so they're never written into this page
+         and can't drift from what checkout actually charges. -->
+    <section class="section wrap" id="pricing">
+      <h2>One plan, every feature</h2>
+      <p class="lead">One subscription covers your whole guild — every member, every feature. Cancel any time.</p>
       <div class="form-card">
-        <div class="field">
-          <label for="discord">Discord handle</label>
-          <input id="discord" type="text" placeholder="yourname" maxlength="64" autocomplete="off" />
-        </div>
-        <div class="field">
-          <label for="guild">Guild name <span class="opt">(optional)</span></label>
-          <input id="guild" type="text" placeholder="The name of your guild" maxlength="100" autocomplete="off" />
-        </div>
-        <div class="field">
-          <label for="game">Which game <span class="opt">(optional)</span></label>
-          <input id="game" type="text" placeholder="Throne &amp; Liberty, Aion 2, …" maxlength="60" autocomplete="off" />
-        </div>
-        <div class="field">
-          <label for="note">Anything else <span class="opt">(optional)</span></label>
-          <textarea id="note" placeholder="Guild size, what you're using now, what you need…" maxlength="500"></textarea>
-        </div>
-        <button class="btn btn-primary" id="submitBtn">Request access</button>
-        <div class="form-msg" id="formMsg"></div>
+        <div class="price-line"><span class="price" data-price>&nbsp;</span> <span class="opt" data-price-per>per guild</span></div>
+        <p class="hero-note" data-trial-line hidden></p>
+        <ul class="price-list">
+          <li>Rosters, attendance, LOA and event signups</li>
+          <li>Gear tracking and loot councils</li>
+          <li>War records from scoreboard screenshots</li>
+          <li>Discord bot and slash commands for your server</li>
+        </ul>
+        <a href="/setup" class="btn btn-primary">Add your guild</a>
+        <p class="opt" style="margin-top:12px;">Payments are handled by Paddle, our reseller. You'll need Manage Server in your guild's Discord.</p>
       </div>
     </section>
   </main>
@@ -494,53 +482,23 @@
       showShot(next.dataset.shot);
     }));
 
-    const btn = document.getElementById('submitBtn');
-    const msg = document.getElementById('formMsg');
-
-    btn.addEventListener('click', async () => {
-      const discord = document.getElementById('discord').value.trim();
-      msg.className = 'form-msg';
-      msg.textContent = '';
-
-      if (!discord) {
-        msg.className = 'form-msg err';
-        msg.textContent = 'Please enter your Discord handle.';
-        return;
+    // Pricing comes from the payment provider via the server, never from this
+    // file. Until it loads — or if signups aren't open — the plan card shows
+    // no number rather than a stale one.
+    fetch('/api/onboard/plan').then((r) => (r.ok ? r.json() : null)).then((plan) => {
+      if (!plan || plan.amount == null || !plan.currency) return;
+      const fmt = new Intl.NumberFormat(undefined, { style: 'currency', currency: plan.currency });
+      const price = fmt.format(plan.amount / 10 ** fmt.resolvedOptions().maximumFractionDigits);
+      const every = plan.frequency > 1 ? plan.frequency + ' ' + plan.interval + 's' : plan.interval;
+      document.querySelector('[data-price]').textContent = price + ' / ' + every;
+      if (plan.trial) {
+        const trial = plan.trial.frequency + '-' + plan.trial.interval + ' free trial';
+        const line = document.querySelector('[data-trial-line]');
+        line.textContent = trial + ' — cancel before it ends and you pay nothing.';
+        line.hidden = false;
+        document.querySelector('[data-trial-eyebrow]').textContent = trial;
       }
-
-      btn.disabled = true;
-      btn.textContent = 'Sending…';
-
-      try {
-        const resp = await fetch('/api/early-access', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            discord,
-            guild: document.getElementById('guild').value.trim(),
-            game: document.getElementById('game').value.trim(),
-            note: document.getElementById('note').value.trim(),
-          }),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (resp.ok) {
-          msg.className = 'form-msg ok';
-          msg.textContent = "Got it — we'll be in touch on Discord. Welcome aboard.";
-          btn.textContent = 'Request sent ✓';
-          ['discord', 'guild', 'game', 'note'].forEach((id) => (document.getElementById(id).value = ''));
-        } else {
-          msg.className = 'form-msg err';
-          msg.textContent = data.error || 'Something went wrong. Please try again.';
-          btn.disabled = false;
-          btn.textContent = 'Request access';
-        }
-      } catch (e) {
-        msg.className = 'form-msg err';
-        msg.textContent = 'Network error — please try again.';
-        btn.disabled = false;
-        btn.textContent = 'Request access';
-      }
-    });
+    }).catch(() => {});
   </script>
 </body>
 </html>

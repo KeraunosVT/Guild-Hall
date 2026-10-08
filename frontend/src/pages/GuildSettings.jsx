@@ -4,6 +4,7 @@ import { Save, ShieldAlert, Hash, Clock, Plus, X, Loader2, AlertTriangle, AtSign
 import { useAuth } from '../auth';
 import RestrictedGate from '../components/ui/RestrictedGate';
 import { PageShell } from '../components/ui/PageShell';
+import BillingPanel from '../components/BillingPanel';
 import Button from '../components/ui/Button';
 import Toast from '../components/ui/Toast';
 import { useFlash } from '../components/ui/useFlash';
@@ -379,6 +380,10 @@ export default function GuildSettings() {
         </Button>
         <span className="text-ash/50 text-xs">Every change is recorded in the audit log.</span>
       </div>
+
+      {/* Outside the form above on purpose: nothing here is saved by "Save
+          settings" — billing changes happen in the provider's portal. */}
+      <BillingPanel />
     </PageShell>
   );
 }

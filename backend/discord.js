@@ -174,6 +174,24 @@ async function listRoles(guild) {
   });
 }
 
+// ── Is the bot in this server? ──────────────────────────────────────────────
+// Asked by self-serve onboarding before a guild is created: a guild whose
+// server the bot has left (or was never really added to) would go live with
+// no slash commands, no posts and no role checks. REST rather than the
+// gateway's cache, so it answers correctly even while the gateway reconnects.
+// Returns { inGuild, name } — name is the server's current name, for the form.
+async function botGuild(discordGuildId) {
+  if (!botConfigured) throw new Error('Discord bot is not configured.');
+  if (!/^\d{17,20}$/.test(String(discordGuildId || ''))) return { inGuild: false, name: null };
+  const res = await axios.get(`${API}/guilds/${discordGuildId}`, {
+    headers: authHeaders(),
+    validateStatus: (s) => s < 500,
+  });
+  return res.status === 200
+    ? { inGuild: true, name: (res.data && res.data.name) || null }
+    : { inGuild: false, name: null };
+}
+
 // ── Posting ─────────────────────────────────────────────────────────────────
 function rosterChannel(guild, fn) {
   requireGuildId(guild, fn); // token + guild sanity first
@@ -206,4 +224,4 @@ async function postImage(guild, buffer, filename, content) {
   );
 }
 
-module.exports = { listMembers, listRoles, fetchMember, postEmbed, postImage, botConfigured, invalidateGuild };
+module.exports = { listMembers, listRoles, fetchMember, botGuild, postEmbed, postImage, botConfigured, invalidateGuild };

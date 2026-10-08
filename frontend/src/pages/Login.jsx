@@ -13,6 +13,11 @@ function gateMessage() {
       return "That Discord account isn't in a server this hall serves. Membership is required to enter.";
     case 'forbidden':
       return 'Your account is in the server but lacks the rank required to enter the hall.';
+    // A guild suspended for an unpaid subscription. Said plainly, because "not
+    // a member" would send its officers hunting for a Discord problem.
+    case 'suspended':
+      return "Your guild's hall is closed because its subscription lapsed. Whoever manages billing can renew it "
+        + 'from the receipt email Paddle sent, and everything will be exactly as you left it.';
     // Split out of the old catch-all `error`, because the three have entirely
     // different fixes and lumping them together told nobody anything.
     case 'state':
@@ -52,6 +57,12 @@ export default function Login() {
       {message && (
         <div className="rise rise-2 mt-6 max-w-md px-5 py-3 border border-oxblood/50 bg-oxblooddeep/20 rounded-lg text-sm text-bone">
           {message}
+          {/* Not a member anywhere may simply mean their guild isn't here yet. */}
+          {new URLSearchParams(window.location.search).get('auth') === 'not_member' && (
+            <div className="mt-2">
+              <a href="/setup" className="text-brassbright underline underline-offset-4">Add your guild to Guild Hall</a>
+            </div>
+          )}
         </div>
       )}
 

@@ -137,4 +137,6 @@ This runs as a single Node process (Render, Railway, Fly, or similar all work wi
 
 ## License
 
-[AGPL-3.0](LICENSE). Self-host it, re-theme it, run it for your guild freely. If you modify it and run it as a service, the license requires making your modified source available to your users — a link to your fork covers it.
+[FSL-1.1-MIT](LICENSE) (the [Functional Source License](https://fsl.software)). Self-host it, re-theme it, and run it for your own guild freely. What it doesn't allow is offering it to others as a competing commercial product or hosted service. Each version becomes plain MIT two years after it's released.
+
+Versions published before 2026-10-07 were released under AGPL-3.0, and copies taken then keep that license.

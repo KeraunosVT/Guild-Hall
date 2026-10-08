@@ -33,7 +33,7 @@
     "multer": "^2.1.1",
     "papaparse": "^5.5.3"
   },
-  "license": "AGPL-3.0-only",
+  "license": "FSL-1.1-MIT",
   "devDependencies": {
     "playwright-core": "^1.62.1"
   }

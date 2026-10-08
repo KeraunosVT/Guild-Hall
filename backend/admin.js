@@ -113,7 +113,7 @@ const team = (v) => {
   return null;
 };
 
-module.exports = function createAdminRouter(supabase, gateway, lootCatalog, identities) {
+module.exports = function createAdminRouter(supabase, gateway, lootCatalog, identities, geminiQuota = require('./geminiQuota')(), billing = null) {
   const router = express.Router();
   // Guild-scoped client for this request. admin.js is built once at boot, so the
   // guild can only come from the request — never from a module constant.
@@ -993,6 +993,8 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
     try {
       let players = [];
       if (f.mimetype.startsWith('image/')) {
+        const quota = geminiQuota.take(req.guildId, 1);
+        if (!quota.ok) return geminiQuota.refuse(res, quota, 1);
         players = (await parseScreenshot(f.buffer, f.mimetype)).players;
       } else if (f.mimetype === 'text/csv' || /\.csv$/i.test(f.originalname)) {
         players = parseCsv(f.buffer.toString('utf8')).players;
@@ -1032,6 +1034,11 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
   router.post('/match/parse', upload.array('files', 20), async (req, res) => {
     const files = req.files || [];
     if (files.length === 0) return res.status(400).json({ error: 'No files uploaded.' });
+
+    // Charge the whole batch before reading any of it — see geminiQuota.take.
+    const images = files.filter((f) => f.mimetype.startsWith('image/')).length;
+    const quota = geminiQuota.take(req.guildId, images);
+    if (!quota.ok) return geminiQuota.refuse(res, quota, images);
 
     const results = await Promise.all(files.map(async (f) => {
       try {
@@ -1697,6 +1704,72 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       voice_channels: voiceChannels,
       everyone_role_id: req.guild.discord_guild_id,
     });
+  });
+
+  // ── Billing: this guild's subscription ──────────────────────────────────────
+  // Under /settings so it takes the same `settings` permission as the rest of
+  // the guild's own configuration. `comped` means no subscription row — every
+  // guild created by scripts/onboardGuild.js — and the panel says so instead of
+  // offering a portal that has nothing to manage.
+  router.get('/settings/billing', async (req, res) => {
+    if (!billing) return res.json({ comped: true });
+    try {
+      const sub = await billing.forGuild(req.guildId);
+      if (!sub) return res.json({ comped: true });
+      res.json({
+        comped: false,
+        status: sub.status,
+        trial_ends_at: sub.trial_ends_at,
+        current_period_end: sub.current_period_end,
+        grace_until: sub.grace_until,
+        can_manage: Boolean(sub.provider_customer_id),
+      });
+    } catch (err) {
+      console.error('billing status error:', err.message);
+      res.status(500).json({ error: 'Could not load billing status.' });
+    }
+  });
+
+  // A fresh link into the provider's customer portal: update the card, see
+  // invoices, cancel. Generated per click — portal sessions are short-lived.
+  router.post('/settings/billing/portal', async (req, res) => {
+    if (!billing) return res.status(503).json({ error: 'Billing is not configured.' });
+    try {
+      const sub = await billing.forGuild(req.guildId);
+      if (!sub) return res.status(404).json({ error: 'This guild has no subscription to manage.' });
+      res.json({ url: await billing.portalUrl(sub.provider_customer_id) });
+    } catch (err) {
+      console.error('billing portal error:', err.message);
+      res.status(502).json({ error: 'Could not open billing just now — try again in a moment.' });
+    }
+  });
+
+  // ── Setup checklist ─────────────────────────────────────────────────────────
+  // What a newly onboarded guild still has to do, for the checklist on Home.
+  // Derived from what exists rather than stored as progress, so it can never
+  // claim a step is done that isn't — or nag about one an officer already
+  // finished on the settings page.
+  router.get('/settings/setup-status', async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: 'Database not configured.' });
+    const g = req.guild;
+    const db = dbFor(req);
+    const count = async (table) => {
+      const { count: n, error } = await db.from(table).select('id', { count: 'exact', head: true });
+      if (error) throw new Error(`${table}: ${error.message}`);
+      return n || 0;
+    };
+    try {
+      const [schedules, matches] = await Promise.all([count('event_schedule'), count('wargame_matches')]);
+      res.json({
+        channels: Boolean(g.roster_channel_id && g.loa_channel_id && g.announce_channel_id),
+        member_roles: Array.isArray(g.member_role_ids) && g.member_role_ids.length > 0,
+        event_schedule: schedules > 0,
+        first_match: matches > 0,
+      });
+    } catch (err) {
+      console.error('setup-status error:', err.message);
+      res.status(500).json({ error: 'Could not load setup status.' });
+    }
   });
 
   router.put('/settings', async (req, res) => {

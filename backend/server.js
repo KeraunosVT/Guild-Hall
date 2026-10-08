@@ -27,6 +27,8 @@ const VALID_BOSS_WEAPONS = new Set(
 const createLootCatalog = require('./lootCatalog');
 const createEliteTimers = require('./eliteTimers');
 const createGearIlvl = require('./gearIlvl');
+const createBilling = require('./billing');
+const createOnboarding = require('./onboarding');
 const createIdentities = require('./identities');
 const createLoa = require('./loa');
 const createEventSignups = require('./eventSignups');
@@ -63,6 +65,10 @@ const gearSubmitLimiter = rateLimit({
   message: { error: `Too many gear submissions — the limit is ${GEAR_SUBMIT_LIMIT} per hour. Try again later.` },
 });
 
+// Per-GUILD ceiling on the same spend, shared with the admin match upload — the
+// limiter above caps one member, this caps the tenant. See geminiQuota.js.
+const geminiQuota = require('./geminiQuota')();
+
 // CORS allowlist. The frontend is served same-origin by this server, so no
 // cross-origin access is needed in production — `origin: false` sends no CORS
 // headers at all (same-origin requests are unaffected). For local dev (Vite on
@@ -79,11 +85,15 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],       // landing page inline script
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      // Paddle.js (checkout on /setup) must load from Paddle's CDN — their docs
+      // forbid self-hosting it — and opens its checkout in a Paddle-hosted
+      // frame that talks back to Paddle's APIs.
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.paddle.com'],  // + landing page inline script
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdn.paddle.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://*.supabase.co'],
-      connectSrc: ["'self'", 'https://*.supabase.co'],
+      imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://*.supabase.co', 'https://*.paddle.com'],
+      connectSrc: ["'self'", 'https://*.supabase.co', 'https://*.paddle.com'],
+      frameSrc: ['https://*.paddle.com'],
       frameAncestors: ["'none'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -95,6 +105,10 @@ app.use(helmet({
 }));
 
 app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: true }));
+// The billing webhook goes BEFORE express.json(): Paddle signs the exact bytes
+// it sent, and a body that has been parsed and re-serialised never matches.
+// The router carries its own express.raw() for that one route.
+app.use('/api/billing', (req, res, next) => billingWebhook(req, res, next));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -159,6 +173,14 @@ const { resolveGuildOrSingle } = createGuildContext(supabase, applyGuildAccess);
 // The gateway needs Supabase for /elitetimer persistence, so start it after setup.
 gateway.start(supabase);
 
+// Paid subscriptions (Paddle). The webhook is mounted above express.json() via
+// billingWebhook; the sweep suspends guilds whose grace period has run out.
+// Without PADDLE_* configured the webhook answers 503 and nothing is charged —
+// comped guilds (no subscription row) are never touched either way.
+const billing = createBilling(supabase);
+const billingWebhook = billing.webhookRouter();
+if (supabase) billing.startSweep();
+
 // ── GUILD ALIASES ────────────────────────────────────────────────────────────
 // Our guild has changed names over time. Collapse all past names to the current
 // one so stats aren't split across what looks like several separate guilds. Any
@@ -210,67 +232,6 @@ app.use('/api', (req, res, next) => {
 
 // Health check (public)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
-
-// ── EARLY ACCESS (public) ────────────────────────────────────────────────────
-// The landing page's "request early access" form posts here. We forward the
-// submission to a Discord webhook (officer channel) — no database, no stored
-// PII beyond what Discord keeps. Rate-limited to blunt spam/abuse of an
-// unauthenticated endpoint. If EARLY_ACCESS_WEBHOOK_URL isn't set, the route
-// reports itself unavailable rather than pretending to succeed.
-const EARLY_ACCESS_WEBHOOK_URL = process.env.EARLY_ACCESS_WEBHOOK_URL || '';
-const earlyAccessLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  limit: 5,                 // 5 requests/hour per IP — a person, not a bot
-  keyGenerator: (req) => ipKeyGenerator(req.ip),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests — please try again later.' },
-});
-
-app.post('/api/early-access', earlyAccessLimiter, async (req, res) => {
-  if (!EARLY_ACCESS_WEBHOOK_URL) {
-    return res.status(503).json({ error: 'Early access signups are not currently open.' });
-  }
-
-  // Accept a Discord handle plus optional context. Everything is trimmed and
-  // length-capped so a submission can't bloat or break the webhook payload.
-  const clean = (v, max) => String(v || '').trim().slice(0, max);
-  const discord = clean(req.body.discord, 64);
-  const guild = clean(req.body.guild, 100);
-  const game = clean(req.body.game, 60);
-  const note = clean(req.body.note, 500);
-
-  if (!discord) {
-    return res.status(400).json({ error: 'Please include a Discord handle so we can reach you.' });
-  }
-
-  // Discord webhooks treat certain sequences as formatting/mentions; strip @
-  // and backticks defensively and disable mention parsing on the payload.
-  const sanitize = (s) => s.replace(/[`@]/g, '').replace(/\n{3,}/g, '\n\n');
-  const lines = [
-    `**New early-access request**`,
-    `**Discord:** ${sanitize(discord)}`,
-    guild && `**Guild:** ${sanitize(guild)}`,
-    game && `**Game:** ${sanitize(game)}`,
-    note && `**Note:** ${sanitize(note)}`,
-  ].filter(Boolean);
-
-  try {
-    const resp = await fetch(EARLY_ACCESS_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content: lines.join('\n'),
-        allowed_mentions: { parse: [] }, // never ping anyone from user input
-      }),
-    });
-    if (!resp.ok) throw new Error(`webhook responded ${resp.status}`);
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error('Early-access webhook failed:', err.message);
-    return res.status(502).json({ error: 'Could not submit right now — please try again later.' });
-  }
-});
 
 // ── THREAT BOARD (public) ────────────────────────────────────────────────────
 // The wider Americas server, not any one house. Deliberately mounted ABOVE the
@@ -373,6 +334,18 @@ app.use('/api/fills', wargameFills
 // Discord login routes (public)
 app.use('/api/auth', authRouter);
 
+// Self-serve onboarding (public — the person setting up has no guild yet, so
+// no session either; onboarding.js carries its own signed cookie). Paid first:
+// a guild is only created from a subscription seat. Not on the merc host,
+// which never lets /api/onboard past the MERC_API filter above.
+app.use('/api/onboard', createOnboarding(supabase, {
+  billing,
+  // New guilds are announced where staff already watch. Platform config, like
+  // FILLS_STAFF_CHANNEL_ID — never any tenant's channel.
+  notifyStaff: (message) => gateway.postToChannel(
+    process.env.ONBOARDING_STAFF_CHANNEL_ID || process.env.FILLS_STAFF_CHANNEL_ID, message),
+}));
+
 // Everything else under /api requires a valid guild-member session, and then a
 // resolved guild. Full login wall: stats, matches, and match detail are gated.
 //
@@ -403,7 +376,7 @@ app.use('/api/admin/audit-log', requirePermission('audit'), auditLog
   : (req, res) => res.status(503).json({ error: 'Database not configured.' }));
 
 const createAdminRouter = require('./admin');
-app.use('/api/admin', requireAdminArea, auditLog ? auditLog.log : (req, res, next) => next(), createAdminRouter(supabase, gateway, lootCatalog, identities));
+app.use('/api/admin', requireAdminArea, auditLog ? auditLog.log : (req, res, next) => next(), createAdminRouter(supabase, gateway, lootCatalog, identities, geminiQuota, billing));
 
 // ── MEMBERS AREA: Class builds ───────────────────────────────────────────────
 app.get('/api/my-classes', async (req, res) => {
@@ -480,6 +453,8 @@ app.post('/api/gear-ilvl', gearSubmitLimiter, gearUpload.single('image'), async 
   if (!req.file.mimetype?.startsWith('image/')) {
     return res.status(415).json({ error: 'Please upload an image file (PNG or JPG screenshot).' });
   }
+  const quota = geminiQuota.take(req.guildId, 1);
+  if (!quota.ok) return geminiQuota.refuse(res, quota, 1);
   try {
     const extracted = await gearIlvl.parseGearScreenshot(req.file.buffer, req.file.mimetype);
     const entry = await gearIlvl.submit(req.guildId, req.user.id, req.user.username, extracted);

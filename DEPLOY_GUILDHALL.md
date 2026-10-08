@@ -298,6 +298,64 @@ Sessions stay per host on purpose: signing in on merc doesn't sign you in on
 guild-hall.gg. Never set a `Domain=.guild-hall.gg` cookie — it would also be
 sent to tourney.guild-hall.gg, which is a different app.
 
+## 11. Paid self-serve onboarding (Paddle)
+
+Guilds add themselves at `/setup`, but only after paying. The flow:
+1. Sign in with Discord.
+2. Paddle checkout.
+3. Add the bot to a server they hold Manage Server in.
+4. Fill in the basics.
+
+Guilds created with `scripts/onboardGuild.js` are comped: they have no subscription and are never billed or suspended.
+
+Do every step on **sandbox** first. Only switch `PADDLE_ENV` to `production` after a full sandbox run.
+
+1. **Database:** SQL Editor → run `migrations/saas_014_billing_onboarding.sql` (after saas_013). Run it on the test project too.
+2. **Paddle account:** sign up at [paddle.com](https://www.paddle.com). A live account has to be approved by Paddle before it can sell, so apply early. For testing, use [sandbox-vendors.paddle.com](https://sandbox-vendors.paddle.com).
+3. **Paddle → Catalog:** create a product "Guild Hall", with one **monthly** price. Set its **trial period** (for example 14 days, payment method required). Copy the price id (`pri_…`).
+4. **Paddle → Developer tools → Authentication:**
+   - Create an **API key** with `price.read` and `customer_portal_session.write`.
+   - Create a **client-side token** (`test_…` on sandbox, `live_…` on production).
+5. **Paddle → Developer tools → Notifications:**
+   - New destination: URL `https://guild-hall.gg/api/billing/webhook`.
+   - Events: every `subscription.*` event.
+   - Copy the destination's **secret key**.
+6. **Paddle → Checkout settings:** add `guild-hall.gg` as an approved domain, and set the default payment link to `https://guild-hall.gg/setup`.
+7. **Discord Developer Portal → the Guild Hall application → OAuth2 → Redirects:** add `https://guild-hall.gg/api/onboard/callback` next to the existing login redirect.
+8. **Droplet:** add the settings below to `backend/.env`, then run `sudo systemctl restart guildhall`:
+
+```bash
+PADDLE_ENV=sandbox            # exactly "production" to charge real cards
+PADDLE_API_KEY=
+PADDLE_CLIENT_TOKEN=
+PADDLE_PRICE_ID=
+PADDLE_WEBHOOK_SECRET=
+BILLING_GRACE_DAYS=7
+# New guilds are announced here (falls back to FILLS_STAFF_CHANNEL_ID).
+ONBOARDING_STAFF_CHANNEL_ID=
+# While testing on sandbox: ONLY these Discord user ids can add a guild.
+# Without it, anyone with Paddle's public test card could create a real guild.
+ONBOARDING_ALLOWED_USERS=<your Discord user id>
+```
+
+**Going live:**
+1. Switch the Paddle settings to the production values, with `PADDLE_ENV=production`.
+2. **Delete `ONBOARDING_ALLOWED_USERS`.**
+3. Restart.
+
+Leave the allowlist in place until both are done.
+
+**Check:**
+- The landing page shows the price.
+- `/setup` walks through sign-in → checkout (sandbox test card `4242 4242 4242 4242`) → add the bot → basics, and you land in the new guild as an officer.
+- The guild's Settings page shows **Billing: Free trial**, and **Manage billing** opens Paddle's portal.
+
+**If payment lapses:**
+- The guild keeps working for `BILLING_GRACE_DAYS` and officers see a banner.
+- After that, a sweep (every 10 minutes) sets `status = 'suspended'` and `suspended_reason = 'billing'`.
+- Paying again restores it automatically.
+- To suspend a guild yourself, set `suspended_reason = 'staff'`. A payment never lifts that.
+
 ## Troubleshooting
 
 | Symptom | Check |

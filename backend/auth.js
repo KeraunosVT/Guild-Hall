@@ -222,7 +222,8 @@ router.get('/discord/callback', async (req, res) => {
     const isStaff = await staff.isStaff(identity.id);
 
     // 3. Which guilds we host is this user actually in?
-    const hosted = await discoverHostedGuilds(accessToken);
+    const discovered = {};
+    const hosted = await discoverHostedGuilds(accessToken, discovered);
 
     // 4. Read their member object in each, and evaluate roles per guild.
     const { memberships, user } = hosted.length
@@ -241,7 +242,10 @@ router.get('/discord/callback', async (req, res) => {
     // still get their memberships, which is what lets an officer post fill
     // requests for their guild from there.
     if (!isStaff && !site.merc) {
-      if (!hosted.length) return res.redirect(`${APP}?auth=not_member`);
+      if (!hosted.length) {
+        const why = (await hasBillingSuspendedGuild(discovered.serverIds)) ? 'suspended' : 'not_member';
+        return res.redirect(`${APP}?auth=${why}`);
+      }
       if (!memberships.length) return res.redirect(`${APP}?auth=forbidden`);
     }
 
@@ -369,7 +373,7 @@ async function evaluateMember(member, guild) {
 // scope — just confirm the tenant row is present and active.
 // Shared deployment: ask Discord for the user's servers and keep the hosted
 // ones. The registry does the intersection in one query.
-async function discoverHostedGuilds(accessToken) {
+async function discoverHostedGuilds(accessToken, out = {}) {
   if (SINGLE_GUILD_ID) {
     const row = await guildRegistry.resolveById(db, SINGLE_GUILD_ID);
     if (!row) {
@@ -400,7 +404,24 @@ async function discoverHostedGuilds(accessToken) {
     throw new Error(`guild list fetch failed: ${res.status}`);
   }
 
-  return guildRegistry.resolveManyByDiscordIds(db, (res.data || []).map((g) => g.id));
+  const serverIds = (res.data || []).map((g) => g.id);
+  out.serverIds = serverIds;
+  return guildRegistry.resolveManyByDiscordIds(db, serverIds);
+}
+
+// When login finds no active guild, is that because one of the user's servers
+// IS a guild — suspended for an unpaid subscription? "Not a member" would send
+// its officers hunting for a Discord problem; "renew" is the actual fix. Only
+// billing suspensions are named: a guild staff suspended stays "not a member",
+// which says nothing about why.
+async function hasBillingSuspendedGuild(serverIds) {
+  if (!db || !Array.isArray(serverIds) || !serverIds.length) return false;
+  const { data, error } = await db.from('guilds').select('id')
+    .in('discord_guild_id', serverIds.map(String))
+    .eq('status', 'suspended').eq('suspended_reason', 'billing')
+    .limit(1);
+  if (error) { console.error('billing-suspension check failed:', error.message); return false; }
+  return Boolean(data && data.length);
 }
 
 // Fetch the member object in each hosted guild and evaluate it there. Guilds
@@ -710,7 +731,40 @@ function hasValidSession(req) {
   }
 }
 
+// ── Purpose-scoped tokens ───────────────────────────────────────────────────
+// For short-lived signed cookies that are NOT sessions — today, self-serve
+// onboarding's gh_onboard. Each purpose signs with its own key derived from
+// JWT_SECRET, so a token minted for one purpose can never verify as another:
+// most importantly, an onboarding token pasted into gh_session is rejected by
+// requireAuth outright instead of being read as a (strange) session.
+const scopedKey = (purpose) => crypto.createHmac('sha256', JWT_SECRET || '').update(`gh-scope:${purpose}`).digest();
+
+function signScoped(purpose, payload, expiresIn) {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET is not set.');
+  return jwt.sign(payload, scopedKey(purpose), { expiresIn });
+}
+
+function verifyScoped(purpose, token) {
+  if (!JWT_SECRET || !token) return null;
+  try { return jwt.verify(token, scopedKey(purpose)); } catch { return null; }
+}
+
+// What onboarding needs to run its own Discord OAuth: the same application,
+// cookie attributes and CSRF state cookie as login, so there's one place to
+// change any of them.
+const oauth = {
+  configured: authConfigured,
+  clientId: DISCORD_CLIENT_ID,
+  clientSecret: DISCORD_CLIENT_SECRET,
+  // The main site's origin, from the login redirect already registered —
+  // never from the Host header.
+  origin: (() => { try { return new URL(DISCORD_REDIRECT_URI).origin; } catch { return ''; } })(),
+  appUrl: APP_URL,
+  baseCookie,
+  stateCookie: STATE_COOKIE,
+};
+
 module.exports = {
   router, requireAuth, optionalAuth, requireAdmin, requireAdminArea, requirePermission, userHas,
-  hasValidSession, applyGuildAccess,
+  hasValidSession, applyGuildAccess, signScoped, verifyScoped, oauth,
 };
