@@ -60,6 +60,21 @@ function loadPaddle() {
   return paddleLoading;
 }
 
+// Paddle.js is initialised exactly once per page. Checkout events go through a
+// listener the page can swap, rather than re-initialising to change it.
+let paddleReady = null;
+let onPaddleEvent = () => {};
+function initPaddle(plan) {
+  if (!paddleReady) {
+    paddleReady = loadPaddle().then((Paddle) => {
+      if (plan.environment === 'sandbox') Paddle.Environment.set('sandbox');
+      Paddle.Initialize({ token: plan.clientToken, eventCallback: (e) => onPaddleEvent(e) });
+      return Paddle;
+    }).catch((err) => { paddleReady = null; throw err; });
+  }
+  return paddleReady;
+}
+
 const TIMEZONES = (() => {
   try { return Intl.supportedValuesOf('timeZone'); } catch { return ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'UTC']; }
 })();
@@ -115,9 +130,21 @@ export default function Setup() {
 
   useEffect(() => {
     refresh();
-    axios.get('/api/onboard/plan').then((r) => setPlan(r.data)).catch(() => setPlan(null));
-    // Clear ?error= so a refresh doesn't keep showing an old problem.
-    if (window.location.search) window.history.replaceState(null, '', '/setup');
+    // ?_ptxn=txn_… is Paddle's "pay this transaction" link: this page is the
+    // account's default payment link, so failed-renewal emails and "update
+    // payment method" links land here. Paddle.js opens that checkout by itself
+    // once initialised — it only has to be loaded, and the URL left alone
+    // until it has read the parameter.
+    const paddleTxn = new URLSearchParams(window.location.search).get('_ptxn');
+    axios.get('/api/onboard/plan').then((r) => {
+      setPlan(r.data);
+      if (paddleTxn && r.data && r.data.clientToken) {
+        initPaddle(r.data).catch(() => setNotice('Could not open the payment page. Please refresh and try again.'));
+      }
+    }).catch(() => setPlan(null));
+    // Clear ?error= so a refresh doesn't keep showing an old problem — but
+    // never a Paddle payment link, which Paddle.js still has to read.
+    if (window.location.search && !paddleTxn) window.history.replaceState(null, '', '/setup');
     return () => clearInterval(pollTimer.current);
   }, [refresh]);
 
@@ -140,12 +167,8 @@ export default function Setup() {
   const openCheckout = async () => {
     setNotice('');
     try {
-      const Paddle = await loadPaddle();
-      if (plan.environment === 'sandbox') Paddle.Environment.set('sandbox');
-      Paddle.Initialize({
-        token: plan.clientToken,
-        eventCallback: (e) => { if (e && e.name === 'checkout.completed') waitForSeat(); },
-      });
+      onPaddleEvent = (e) => { if (e && e.name === 'checkout.completed') waitForSeat(); };
+      const Paddle = await initPaddle(plan);
       Paddle.Checkout.open({
         items: [{ priceId: plan.priceId, quantity: 1 }],
         // Ties the subscription to this Discord account — it's how the
