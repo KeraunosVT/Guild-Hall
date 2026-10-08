@@ -1759,8 +1759,29 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       return n || 0;
     };
     try {
-      const [schedules, matches] = await Promise.all([count('event_schedule'), count('wargame_matches')]);
+      const [schedules, matches, presence] = await Promise.all([
+        count('event_schedule'),
+        count('wargame_matches'),
+        // Read fresh rather than from req.guild: the registry caches the row,
+        // and a bot that was just added back should clear the banner now.
+        // `guilds` is the tenant registry (GLOBAL_TABLES), scoped by its id.
+        supabase.from('guilds').select('bot_removed_at').eq('id', req.guildId).maybeSingle(),
+      ]);
+      const botRemovedAt = (presence.data && presence.data.bot_removed_at) || null;
+      // The same invite the onboarding flow uses, pinned to this guild's own
+      // server so it can't be added somewhere else by mistake.
+      const invite = botRemovedAt && process.env.DISCORD_CLIENT_ID
+        ? `https://discord.com/oauth2/authorize?${new URLSearchParams({
+          client_id: process.env.DISCORD_CLIENT_ID,
+          scope: 'bot applications.commands',
+          permissions: process.env.DISCORD_BOT_PERMISSIONS || '52224',
+          guild_id: g.discord_guild_id,
+          disable_guild_select: 'true',
+        }).toString()}`
+        : null;
       res.json({
+        bot_removed_at: botRemovedAt,
+        bot_invite_url: invite,
         channels: Boolean(g.roster_channel_id && g.loa_channel_id && g.announce_channel_id),
         member_roles: Array.isArray(g.member_role_ids) && g.member_role_ids.length > 0,
         event_schedule: schedules > 0,

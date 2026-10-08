@@ -44,6 +44,7 @@ const FILTERS = [
   { key: 'grace', label: 'In grace' },
   { key: 'billing', label: 'Billing suspended' },
   { key: 'staff', label: 'Staff suspended' },
+  { key: 'nobot', label: 'Bot removed' },
 ];
 
 function SuspendControl({ g, busy, onSuspend }) {
@@ -82,8 +83,9 @@ function GuildsTable() {
   useEffect(() => { load(); }, [load]);
 
   const counts = useMemo(() => {
-    const c = { all: 0, active: 0, grace: 0, billing: 0, staff: 0, other: 0 };
-    (data?.guilds || []).forEach((g) => { c.all += 1; c[standing(g).key] += 1; });
+    const c = { all: 0, active: 0, grace: 0, billing: 0, staff: 0, other: 0, nobot: 0 };
+    // 'Bot removed' cuts across standing — a guild can be active AND botless.
+    (data?.guilds || []).forEach((g) => { c.all += 1; c[standing(g).key] += 1; if (g.bot_removed_at) c.nobot += 1; });
     return c;
   }, [data]);
 
@@ -91,7 +93,7 @@ function GuildsTable() {
     const q = f.q.trim().toLowerCase();
     return (data?.guilds || []).filter((g) => (!q || [g.house, g.tag, g.discord_guild_id, g.created_by]
       .some((v) => String(v || '').toLowerCase().includes(q)))
-      && (f.status === 'all' || standing(g).key === f.status));
+      && (f.status === 'all' || (f.status === 'nobot' ? !!g.bot_removed_at : standing(g).key === f.status)));
   }, [data, f]);
 
   const act = async (fn, ok, fail) => {
@@ -157,6 +159,9 @@ function GuildsTable() {
                   </td>
                   <td className="py-2.5 pr-3">
                     <Pill tone={st.tone}>{st.label}</Pill>
+                    {g.bot_removed_at && (
+                      <div className="mt-1"><Pill tone="bad">Bot removed {formatWhen(g.bot_removed_at)}</Pill></div>
+                    )}
                     {st.key === 'staff' && (
                       <div className="text-xs text-ash mt-1 max-w-[16rem]">
                         “{g.suspended_note}” — {g.suspended_by?.replace(/ \(\d+\)$/, '')}{g.suspended_at ? `, ${formatWhen(g.suspended_at)}` : ''}

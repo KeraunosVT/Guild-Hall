@@ -119,6 +119,20 @@ function start(supabase) {
     // once the bot connects, regardless of which optional modules are configured.
     await registerCommands();
     startSignupSweep();
+    // Catch servers that removed (or re-added) the bot while we were offline.
+    reconcileBotPresence().catch((err) => console.error('Bot presence reconcile failed:', err.message));
+  });
+
+  // The bot leaving a server, or being added back. An `available: false`
+  // delete is a Discord outage on that server, not a removal — ignored, or a
+  // blip would flag every guild on the affected shard.
+  client.on('guildDelete', (g) => {
+    if (!g || g.available === false) return;
+    markBotPresence(g.id, false).catch((err) => console.error('Bot presence update failed:', err.message));
+  });
+  client.on('guildCreate', (g) => {
+    if (!g) return;
+    markBotPresence(g.id, true).catch((err) => console.error('Bot presence update failed:', err.message));
   });
 
   client.on('interactionCreate', handleInteraction);
@@ -128,6 +142,54 @@ function start(supabase) {
   client.login(BOT_TOKEN).catch((err) => {
     console.error('❌ Discord gateway login failed:', err.message);
   });
+}
+
+// ── Is the bot still in each guild's server? ────────────────────────────────
+// Recorded on guilds.bot_removed_at (migrations/saas_016). Only a CHANGE is
+// written and reported: the update is conditional on the current value, so a
+// repeat event, or a reconcile that agrees with the database, does nothing —
+// and two processes racing the same event report it once.
+//
+// The listener is how staff hear about it (server.js posts to the staff
+// channel). Set from outside so this file reads no platform config itself.
+let presenceListener = null;
+function setPresenceListener(fn) { presenceListener = typeof fn === 'function' ? fn : null; }
+
+async function markBotPresence(discordGuildId, present) {
+  if (!db || !discordGuildId) return false;
+  let q = db.from('guilds')
+    .update({ bot_removed_at: present ? null : new Date().toISOString() })
+    .eq('discord_guild_id', String(discordGuildId));
+  q = present ? q.not('bot_removed_at', 'is', null) : q.is('bot_removed_at', null);
+  const { data, error } = await q.select('discord_guild_id, house, tag');
+  if (error) throw new Error(error.message);
+  const row = data && data[0];
+  if (!row) return false; // not one of ours, or nothing changed
+  console.log(`Bot ${present ? 'added back to' : 'removed from'} ${row.house} [${row.tag}] (${row.discord_guild_id}).`);
+  if (presenceListener) {
+    Promise.resolve(presenceListener({ present, discordGuildId: row.discord_guild_id, house: row.house, tag: row.tag }))
+      .catch(() => {});
+  }
+  return true;
+}
+
+// Every registered guild against the servers the bot can actually see. Run on
+// connect: a server that kicked the bot while it was offline sends no event.
+async function reconcileBotPresence() {
+  if (!db || !client || !client.guilds) return { removed: 0, restored: 0 };
+  const { data, error } = await db.from('guilds')
+    .select('discord_guild_id, bot_removed_at').neq('status', 'deleted');
+  if (error) throw new Error(error.message);
+  let removed = 0, restored = 0;
+  for (const g of data || []) {
+    const present = client.guilds.cache.has(String(g.discord_guild_id));
+    if (present === !g.bot_removed_at) continue; // already agrees
+    if (await markBotPresence(g.discord_guild_id, present)) {
+      if (present) restored++; else removed++;
+    }
+  }
+  if (removed || restored) console.log(`Bot presence: ${removed} removed, ${restored} restored since last connect.`);
+  return { removed, restored };
 }
 
 // The connected Discord server, by id. Takes the id rather than closing over
@@ -1601,7 +1663,7 @@ module.exports = {
   start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
   notifyLateAttendance,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
-  sendDirectMessage, postToChannel, lookupUser,
+  sendDirectMessage, postToChannel, lookupUser, setPresenceListener,
 };
 
 // ── Test seam ───────────────────────────────────────────────────────────────
@@ -1642,4 +1704,7 @@ module.exports.__test = {
   setEliteTimers: (t) => { eliteTimers = t; },
   eliteBoard,
   handleEliteButton,
+  // Bot presence: the event handler's work and the on-connect reconcile.
+  markBotPresence,
+  reconcileBotPresence,
 };

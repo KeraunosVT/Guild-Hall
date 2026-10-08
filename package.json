@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node backend/server.js",
-    "postinstall": "rm -rf backend/node_modules frontend/node_modules && cd backend && npm install && cd ../frontend && npm install && npm run build"
+    "postinstall": "cd backend && npm ci && cd ../frontend && npm ci && npm run build"
   },
   "license": "FSL-1.1-MIT"
 }

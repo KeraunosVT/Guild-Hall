@@ -221,10 +221,17 @@ export default function Setup() {
           <p className="text-ash text-sm mb-5">Signed in as <span className="text-bone">{state.user.username}</span>.</p>
           {plan ? (
             <>
-              <div className="flex items-baseline gap-3 mb-1">
-                <span className="text-3xl font-display text-brassbright">{formatPrice(plan)}</span>
-                <span className="text-ash text-sm">per guild</span>
-              </div>
+              {formatPrice(plan) ? (
+                <div className="flex items-baseline gap-3 mb-1">
+                  <span className="text-3xl font-display text-brassbright">{formatPrice(plan)}</span>
+                  <span className="text-ash text-sm">per guild</span>
+                </div>
+              ) : (
+                // Paddle's API couldn't be reached for the amount; checkout
+                // still works and shows the exact price, so say that rather
+                // than blocking the signup.
+                <p className="text-sm text-bone mb-1">One subscription per guild — you'll see the exact price at checkout.</p>
+              )}
               {formatTrial(plan) && (
                 <p className="text-sm text-bone mb-4">
                   {formatTrial(plan)} — you won't be charged until it ends, and you can cancel any time before then.

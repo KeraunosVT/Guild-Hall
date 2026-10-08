@@ -38,6 +38,9 @@ const SUITES = [
   // The staff Guilds page: staff only, and suspend / reactivate / comp each
   // doing exactly what they say against billing.
   ['staff guilds', 'staffGuilds.js', true],
+  // Noticing when a guild's server removes the bot — once, and catching up on
+  // changes made while the bot was offline.
+  ['bot presence', 'botPresence.js', true],
 ];
 
 const needsDb = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);

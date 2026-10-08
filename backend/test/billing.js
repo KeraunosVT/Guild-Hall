@@ -151,7 +151,44 @@ const ENV = { PADDLE_WEBHOOK_SECRET: SECRET, PADDLE_API_KEY: 'k', PADDLE_PRICE_I
     check('with no secret configured, nothing is accepted', res.statusCode === 503);
   }
 
-  console.log('\n4. configuration');
+  console.log('\n4. a Paddle outage never blocks a signup');
+  {
+    let up = true;
+    const fetchImpl = async () => (up
+      ? { ok: true, status: 200, json: async () => ({ data: { unit_price: { amount: '1500', currency_code: 'USD' }, billing_cycle: { interval: 'month', frequency: 1 }, trial_period: { interval: 'day', frequency: 14 } } }) }
+      : { ok: false, status: 401, json: async () => ({ error: { code: 'authentication_malformed' } }) });
+
+    // Never loaded: still a plan checkout can open, just without an amount.
+    up = false;
+    const cold = createBilling(null, { env: ENV, fetchImpl });
+    const p0 = await cold.plan();
+    check('with nothing cached, checkout details are still served', p0 && p0.priceId === 'pri_1' && p0.clientToken === 'test_x');
+    check('without an amount, and marked stale', p0.amount === null && p0.stale === true);
+    const h0 = await cold.health();
+    check('and health reports Paddle down, with its reason', !h0.ok && /authentication_malformed/.test(h0.error));
+
+    // Loaded once, then Paddle fails: the last good price is kept.
+    up = true;
+    let t = 0;
+    const realNow = Date.now;
+    Date.now = () => realNow() + t;
+    const warm = createBilling(null, { env: ENV, fetchImpl });
+    const p1 = await warm.plan();
+    check('a healthy load has the real price', p1.amount === 1500 && !p1.stale);
+    check('and health is ok', (await warm.health()).ok);
+    up = false;
+    t = 11 * 60 * 1000; // past the 10-minute cache
+    const p2 = await warm.plan();
+    check('after Paddle fails, the last known price is served', p2.amount === 1500 && p2.stale === true);
+    check('and health turns red', !(await warm.health()).ok);
+    up = true;
+    t = 22 * 60 * 1000;
+    const p3 = await warm.plan();
+    check('when Paddle recovers, it is fresh again', !p3.stale && (await warm.health()).ok);
+    Date.now = realNow;
+  }
+
+  console.log('\n5. configuration');
   check('sandbox unless production is named', createBilling(null, { env: ENV }).environment === 'sandbox');
   check('production when named', createBilling(null, { env: { ...ENV, PADDLE_ENV: 'production' } }).environment === 'production');
   check('a typo is still sandbox', createBilling(null, { env: { ...ENV, PADDLE_ENV: 'prod' } }).environment === 'sandbox');

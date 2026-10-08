@@ -42,9 +42,10 @@ export default function SetupChecklist() {
   if (!allowed) return null;
 
   const lapsed = billing && !billing.comped && LAPSED.has(billing.status) && billing.grace_until;
+  const botMissing = status && status.bot_removed_at;
   const remaining = status ? STEPS.filter((s) => !status[s.key]) : [];
   const showChecklist = status && remaining.length > 0 && !dismissed;
-  if (!lapsed && !showChecklist) return null;
+  if (!lapsed && !showChecklist && !botMissing) return null;
 
   const dismiss = () => {
     try { localStorage.setItem(dismissKey(guildId), '1'); } catch { /* private window */ }
@@ -53,6 +54,24 @@ export default function SetupChecklist() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-4">
+      {/* Not dismissable: until it's fixed, nothing Discord-side works. */}
+      {botMissing && (
+        <div className="px-5 py-4 border border-oxblood/60 bg-oxblooddeep/25 rounded-xl text-sm">
+          <div className="text-bone font-semibold mb-1">Guild Hall's bot isn't in your Discord server</div>
+          <p className="text-ash">
+            It was removed on{' '}
+            <span className="text-bone">{new Date(status.bot_removed_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>.
+            Until it's back, slash commands, roster and LOA posts, signups and attendance snapshots won't work. The website itself is unaffected.
+          </p>
+          {status.bot_invite_url && (
+            <a href={status.bot_invite_url} className="inline-block mt-2 text-brassbright underline underline-offset-4">
+              Add the bot back
+            </a>
+          )}
+          <p className="text-xs text-ash/70 mt-1">Adding it needs the Manage Server permission in Discord.</p>
+        </div>
+      )}
+
       {lapsed && (
         <div className="px-5 py-4 border border-oxblood/60 bg-oxblooddeep/25 rounded-xl text-sm">
           <div className="text-bone font-semibold mb-1">Your subscription needs attention</div>

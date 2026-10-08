@@ -174,6 +174,18 @@ const { resolveGuildOrSingle } = createGuildContext(supabase, applyGuildAccess);
 // The gateway needs Supabase for /elitetimer persistence, so start it after setup.
 gateway.start(supabase);
 
+// Staff hear when the bot is removed from (or added back to) a guild's server.
+// The guild's own officers see it as a banner on Home instead. Platform config
+// channel, never a tenant's.
+gateway.setPresenceListener(({ present, discordGuildId, house, tag }) => gateway.postToChannel(
+  process.env.ONBOARDING_STAFF_CHANNEL_ID || process.env.FILLS_STAFF_CHANNEL_ID,
+  {
+    content: present
+      ? `✅ The bot is back in **${house}** [${tag}] (server ${discordGuildId}).`
+      : `⚠️ The bot was removed from **${house}** [${tag}] (server ${discordGuildId}). Slash commands, posts and role checks have stopped for that guild.`,
+  },
+));
+
 // Paid subscriptions (Paddle). The webhook is mounted above express.json() via
 // billingWebhook; the sweep suspends guilds whose grace period has run out.
 // Without PADDLE_* configured the webhook answers 503 and nothing is charged —

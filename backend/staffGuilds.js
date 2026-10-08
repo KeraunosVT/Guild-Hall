@@ -29,7 +29,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const GUILD_COLUMNS = [
   'id', 'discord_guild_id', 'house', 'tag', 'status', 'suspended_reason',
   'suspended_note', 'suspended_by', 'suspended_at', 'billing_exempt',
-  'subscription_status', 'created_at', 'created_by',
+  'subscription_status', 'created_at', 'created_by', 'bot_removed_at',
 ].join(', ');
 const SUB_COLUMNS = 'guild_id, discord_user_id, status, trial_ends_at, current_period_end, grace_until, created_at';
 

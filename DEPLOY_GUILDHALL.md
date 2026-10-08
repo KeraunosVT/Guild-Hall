@@ -165,7 +165,7 @@ PORT=3000
 Build:
 
 ```bash
-npm install                      # postinstall builds the frontend
+npm ci                           # postinstall installs backend + frontend and builds the frontend
 ls frontend/dist/index.html      # must exist
 ```
 
@@ -238,7 +238,9 @@ tee /srv/guild-hall/deploy.sh > /dev/null << 'EOF'
 set -euo pipefail
 cd /srv/guild-hall
 git pull
-npm install
+# npm ci, not npm install: it installs exactly what the lockfiles say and never
+# rewrites them, so the next git pull can't fail on "local changes".
+npm ci
 sudo systemctl restart guildhall
 sleep 2
 curl -sf localhost:3000/api/health && echo " ✓ deployed"
@@ -349,6 +351,8 @@ Leave the allowlist in place until both are done.
 - The landing page shows the price.
 - `/setup` walks through sign-in → checkout (sandbox test card `4242 4242 4242 4242`) → add the bot → basics, and you land in the new guild as an officer.
 - The guild's Settings page shows **Billing: Free trial**, and **Manage billing** opens Paddle's portal.
+
+**Monitoring:** point an UptimeRobot monitor at `https://guild-hall.gg/api/billing/status`, every 5 minutes. It returns 503 whenever Paddle's API can't be reached, for example after an expired or revoked API key. Don't monitor `/api/onboard/plan` for this. That endpoint deliberately stays up during a Paddle outage (it serves the last known price), so a broken key still lets people sign up, but a monitor on it would never alert.
 
 **If payment lapses:**
 - The guild keeps working for `BILLING_GRACE_DAYS` and officers see a banner.

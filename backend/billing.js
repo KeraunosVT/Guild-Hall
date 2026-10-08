@@ -119,11 +119,33 @@ function createBilling(supabase, {
 
   // ── The plan, for display ─────────────────────────────────────────────────
   // Cached: it's on the landing page, and prices change about never.
+  //
+  // NEVER the thing that stops a signup. Checkout itself only needs the price
+  // id and client token, which are config — the API call is just for showing
+  // the amount. So when Paddle can't be reached (an outage, an expired or
+  // revoked key), this serves the last price it did load, or failing that a
+  // plan with no amount, and checkout still opens and shows the price itself.
+  // Either way it's marked `stale`, and health() reports the failure so the
+  // uptime monitor still catches it — degraded, not silent.
   let planCache = null;
+  let lastError = null; // { message, since } while Paddle is failing
   async function plan() {
     if (!configured) return null;
     if (planCache && Date.now() - planCache.at < 10 * 60 * 1000) return planCache.value;
-    const { data } = await paddle('GET', `/prices/${encodeURIComponent(PRICE_ID)}`);
+    let data;
+    try {
+      ({ data } = await paddle('GET', `/prices/${encodeURIComponent(PRICE_ID)}`));
+    } catch (err) {
+      if (!lastError) lastError = { message: err.message, since: new Date().toISOString() };
+      console.error(`billing plan: ${err.message} — serving ${planCache ? 'the last known price' : 'checkout without a displayed price'}.`);
+      return planCache
+        ? { ...planCache.value, stale: true }
+        : {
+          priceId: PRICE_ID, clientToken: CLIENT_TOKEN, environment: ENVIRONMENT,
+          amount: null, currency: null, interval: null, frequency: null, trial: null, stale: true,
+        };
+    }
+    lastError = null;
     const value = {
       priceId: PRICE_ID,
       clientToken: CLIENT_TOKEN,
@@ -136,6 +158,15 @@ function createBilling(supabase, {
     };
     planCache = { value, at: Date.now() };
     return value;
+  }
+
+  // Can we talk to Paddle right now? For the uptime monitor on
+  // /api/billing/status: plan() above degrades gracefully, so its own
+  // endpoint stays 200 even with a dead key — this is what turns red instead.
+  async function health() {
+    if (!configured) return { ok: false, error: 'Billing is not configured.' };
+    await plan();
+    return lastError ? { ok: false, error: lastError.message, since: lastError.since } : { ok: true };
   }
 
   // ── Seats ─────────────────────────────────────────────────────────────────
@@ -252,6 +283,13 @@ function createBilling(supabase, {
   // bytes, and a parsed-then-restringified body would never match.
   function webhookRouter() {
     const router = express.Router();
+    // For the uptime monitor: 200 when Paddle answers, 503 when it doesn't.
+    // The error is Paddle's own message ("authentication_malformed", …),
+    // never the key.
+    router.get('/status', (req, res) => {
+      health().then((h) => res.status(h.ok ? 200 : 503).json(h))
+        .catch((err) => res.status(503).json({ ok: false, error: err.message }));
+    });
     router.post('/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, res) => {
       handleWebhook(req, res).catch((err) => {
         console.error('billing webhook error:', err.message);
@@ -283,7 +321,7 @@ function createBilling(supabase, {
 
   return {
     configured, environment: ENVIRONMENT, graceDays: GRACE_DAYS,
-    plan, unclaimedSeat, forGuild, portalUrl,
+    plan, health, unclaimedSeat, forGuild, portalUrl,
     handleWebhook, webhookRouter, suspendLapsed, startSweep,
   };
 }
