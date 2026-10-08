@@ -159,6 +159,13 @@ function createBilling(supabase, {
   // subscription), which the panel says rather than offering a portal.
   async function forGuild(guildId) {
     if (!supabase || !guildId) return null;
+    // A guild staff comped (saas_015) is shown as comped whatever its
+    // subscription says — otherwise its officers would get lapse warnings
+    // for a hall that will never close.
+    const { data: g, error: gErr } = await supabase.from('guilds')
+      .select('billing_exempt').eq('id', guildId).maybeSingle();
+    if (gErr) throw new Error(`guild lookup failed: ${gErr.message}`);
+    if (g && g.billing_exempt) return null;
     const { data, error } = await supabase.from('subscriptions')
       .select('status, trial_ends_at, current_period_end, grace_until, provider_customer_id')
       .eq('guild_id', guildId)

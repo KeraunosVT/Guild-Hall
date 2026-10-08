@@ -995,7 +995,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
       if (f.mimetype.startsWith('image/')) {
         const quota = geminiQuota.take(req.guildId, 1);
         if (!quota.ok) return geminiQuota.refuse(res, quota, 1);
-        players = (await parseScreenshot(f.buffer, f.mimetype)).players;
+        players = (await parseScreenshot(f.buffer, f.mimetype, { guildId: req.guildId })).players;
       } else if (f.mimetype === 'text/csv' || /\.csv$/i.test(f.originalname)) {
         players = parseCsv(f.buffer.toString('utf8')).players;
       } else {
@@ -1042,7 +1042,7 @@ module.exports = function createAdminRouter(supabase, gateway, lootCatalog, iden
 
     const results = await Promise.all(files.map(async (f) => {
       try {
-        if (f.mimetype.startsWith('image/')) return { players: (await parseScreenshot(f.buffer, f.mimetype)).players };
+        if (f.mimetype.startsWith('image/')) return { players: (await parseScreenshot(f.buffer, f.mimetype, { guildId: req.guildId })).players };
         if (f.mimetype === 'text/csv' || /\.csv$/i.test(f.originalname)) return { players: parseCsv(f.buffer.toString('utf8')).players };
         return { players: [], error: `${f.originalname}: unsupported type, skipped.` };
       } catch (err) {

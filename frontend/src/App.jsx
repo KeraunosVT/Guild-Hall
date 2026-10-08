@@ -36,6 +36,7 @@ import AuditLog from './pages/AuditLog';
 import GuildSettings from './pages/GuildSettings';
 import ThreatBoard from './pages/ThreatBoard';
 import Setup from './pages/Setup';
+import StaffGuilds from './pages/StaffGuilds';
 import MercApp from './pages/fills/MercApp';
 import { FillsMemberPage, FillsAdminPage, FillsAdminDetail } from './pages/fills/GuildHallFills';
 
@@ -85,7 +86,7 @@ function Splash({ label = 'Verifying standing…' }) {
 // would show the fallback rollover and quietly place events on the wrong night.
 function GuildGate({ children }) {
   const { loading, error, guild, needsReauth } = useGuild();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
 
   if (loading) return <Splash label="Entering the hall…" />;
   if (error || !guild) {
@@ -107,6 +108,11 @@ function GuildGate({ children }) {
         {!needsReauth && (
           <a href="/threat-board" className="text-brass hover:text-brassbright text-sm underline underline-offset-4">
             Go to the Americas Threat Board
+          </a>
+        )}
+        {!needsReauth && user?.staff && (
+          <a href="/staff/guilds" className="text-brass hover:text-brassbright text-sm underline underline-offset-4">
+            Staff: manage all guilds
           </a>
         )}
         {needsReauth && (
@@ -153,6 +159,9 @@ function App() {
             {/* PUBLIC for the same reason: whoever is adding a guild has none
                 yet, so there is no session to gate on. See backend/onboarding.js. */}
             <Route path="/setup" element={<Setup />} />
+            {/* Staff: every tenant. Outside the guild gate because staff may
+                belong to no guild; the page and the API both check staff. */}
+            <Route path="/staff/guilds" element={<StaffGuilds />} />
 
             <Route element={<Gate />}>
               <Route element={<Layout />}>

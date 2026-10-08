@@ -29,6 +29,7 @@ const createEliteTimers = require('./eliteTimers');
 const createGearIlvl = require('./gearIlvl');
 const createBilling = require('./billing');
 const createOnboarding = require('./onboarding');
+const createStaffGuilds = require('./staffGuilds');
 const createIdentities = require('./identities');
 const createLoa = require('./loa');
 const createEventSignups = require('./eventSignups');
@@ -346,6 +347,12 @@ app.use('/api/onboard', createOnboarding(supabase, {
     process.env.ONBOARDING_STAFF_CHANNEL_ID || process.env.FILLS_STAFF_CHANNEL_ID, message),
 }));
 
+// Guild Hall staff: every tenant, with suspend / reactivate / comp. Above the
+// guild wall because staff may belong to no guild at all; the router itself
+// refuses anyone whose session isn't staff (deploy-time config, backend/staff.js).
+// Not on the merc host — /staff isn't in MERC_API.
+app.use('/api/staff/guilds', requireAuth, createStaffGuilds(supabase));
+
 // Everything else under /api requires a valid guild-member session, and then a
 // resolved guild. Full login wall: stats, matches, and match detail are gated.
 //
@@ -456,7 +463,7 @@ app.post('/api/gear-ilvl', gearSubmitLimiter, gearUpload.single('image'), async 
   const quota = geminiQuota.take(req.guildId, 1);
   if (!quota.ok) return geminiQuota.refuse(res, quota, 1);
   try {
-    const extracted = await gearIlvl.parseGearScreenshot(req.file.buffer, req.file.mimetype);
+    const extracted = await gearIlvl.parseGearScreenshot(req.file.buffer, req.file.mimetype, { guildId: req.guildId });
     const entry = await gearIlvl.submit(req.guildId, req.user.id, req.user.username, extracted);
     res.json({ entry });
   } catch (err) {

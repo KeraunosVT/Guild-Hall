@@ -3,6 +3,7 @@
 // and persists one entry per member (a new submission replaces their previous one).
 const { GoogleGenAI, Type } = require('@google/genai');
 const { tenantDb } = require('./tenantDb');
+const { logGeminiUsage } = require('./geminiUsage');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -41,7 +42,8 @@ const RESPONSE_SCHEMA = {
 // armor/accessory are each read directly off the window's "Max ___ Lv." line;
 // average is its "Equipment Lv." line — the game itself defines that as the
 // mean of the other three, so there's no need to recompute it here.
-async function parseGearScreenshot(buffer, mimeType) {
+// `ctx.guildId` only labels the usage log line (geminiUsage.js).
+async function parseGearScreenshot(buffer, mimeType, ctx = {}) {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not set — gear reading is unavailable.');
   }
@@ -58,6 +60,7 @@ async function parseGearScreenshot(buffer, mimeType) {
     }],
     config: { responseMimeType: 'application/json', responseSchema: RESPONSE_SCHEMA, temperature: 0 },
   });
+  logGeminiUsage('gear', GEMINI_MODEL, response, ctx);
 
   let parsed;
   try {

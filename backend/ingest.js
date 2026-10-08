@@ -4,6 +4,7 @@
 // which the admin reviews and edits before committing.
 const { GoogleGenAI, Type } = require('@google/genai');
 const Papa = require('papaparse');
+const { logGeminiUsage } = require('./geminiUsage');
 const fs = require('fs');
 const path = require('path');
 
@@ -113,7 +114,8 @@ function permanentError(message) {
   return err;
 }
 
-async function parseScreenshot(buffer, mimeType) {
+// `ctx.guildId` only labels the usage log line (geminiUsage.js).
+async function parseScreenshot(buffer, mimeType, ctx = {}) {
   if (!GEMINI_API_KEY) {
     console.error('parseScreenshot: GEMINI_API_KEY is not set — screenshot reading is disabled.');
     throw permanentError(
@@ -134,6 +136,7 @@ async function parseScreenshot(buffer, mimeType) {
     contents: [{ role: 'user', parts }],
     config: { responseMimeType: 'application/json', responseSchema: RESPONSE_SCHEMA, temperature: 0 },
   });
+  logGeminiUsage('scoreboard', GEMINI_MODEL, response, ctx);
 
   let parsed;
   try {

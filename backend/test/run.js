@@ -35,6 +35,9 @@ const SUITES = [
   // guild (raced), the webhook's idempotency and ordering, lapse and recovery,
   // and staff suspensions surviving a payment.
   ['paid onboarding', 'onboarding.js', true],
+  // The staff Guilds page: staff only, and suspend / reactivate / comp each
+  // doing exactly what they say against billing.
+  ['staff guilds', 'staffGuilds.js', true],
 ];
 
 const needsDb = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);

@@ -3,7 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
-  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair, Home,
+  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair, Home, Building2,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -145,6 +145,19 @@ export default function Sidebar({ collapsed }) {
           <Heart className="w-4 h-4 shrink-0" />
           {!collapsed && <span className="truncate">Support Guild Hall</span>}
         </a>
+        {/* Platform staff only (deploy-time config, backend/staff.js). Every
+            tenant, not this one — so it sits with the Guild Hall links, not
+            among this guild's admin pages. */}
+        {user?.staff && (
+          <NavLink
+            to="/staff/guilds"
+            title={collapsed ? 'Staff: all guilds' : undefined}
+            className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-ash hover:text-bone hover:bg-panel transition-colors"
+          >
+            <Building2 className="w-4 h-4 shrink-0" />
+            {!collapsed && <span className="truncate">Staff: all guilds</span>}
+          </NavLink>
+        )}
       </div>
 
       {user && (
