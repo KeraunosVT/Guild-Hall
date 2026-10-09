@@ -100,6 +100,41 @@ const STRANGER = '600000000000000006';
   await tickets.handle(c.i);
   check('a ticket topic outside the category deletes nothing', /isn't an open ticket/.test(c.replies[0].content) && !c.wasDeleted());
 
+  console.log('\n6. opening a ticket');
+  // A fake server: records the channel it's asked to create.
+  const openWith = async ({ roleInServer }) => {
+    let created = null, sent = null, reply = null;
+    const i = {
+      guildId: HQ, customId: 'ticket:modal:billing',
+      isChatInputCommand: () => false, isButton: () => false, isModalSubmit: () => true,
+      user: { id: OPENER, username: 'Buyer' },
+      client: { user: { id: '700000000000000007' } },
+      fields: { getTextInputValue: (k) => (k === 'details' ? 'I was charged twice' : 'Iron Wolves') },
+      guild: {
+        roles: { everyone: { id: HQ }, cache: new Map(roleInServer ? [[ROLE, { id: ROLE }]] : []) },
+        channels: {
+          cache: { find: () => null },
+          create: async (opts) => { created = opts; return { id: '800000000000000008', send: async (m) => { sent = m; } }; },
+        },
+      },
+      deferReply: async () => { i.deferred = true; },
+      editReply: async (m) => { reply = m; },
+    };
+    const realError = console.error;
+    console.error = () => {}; // the missing-role warning is expected in one case
+    try { await tickets.handle(i); } finally { console.error = realError; }
+    return { created, sent, reply };
+  };
+  let o = await openWith({ roleInServer: true });
+  check('a channel is created in the category', o.created && o.created.parent === CATEGORY && o.created.topic === makeTopic(OPENER, 'billing'));
+  check('every overwrite says user or role', o.created.permissionOverwrites.every((w) => w.type === 0 || w.type === 1));
+  check('everyone is denied, the opener allowed', o.created.permissionOverwrites[0].deny.length === 1 && o.created.permissionOverwrites[1].id === OPENER);
+  check('the support role is let in and pinged', o.created.permissionOverwrites.some((w) => w.id === ROLE) && o.sent.allowedMentions.roles[0] === ROLE);
+  check('the member is told where it is', /<#800000000000000008>/.test(o.reply));
+  o = await openWith({ roleInServer: false });
+  check('a role from another server still opens the ticket', o.created && /<#800000000000000008>/.test(o.reply));
+  check('without that role in it, or a ping', !o.created.permissionOverwrites.some((w) => w.id === ROLE) && o.sent.allowedMentions.roles.length === 0);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

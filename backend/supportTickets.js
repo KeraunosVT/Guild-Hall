@@ -14,7 +14,7 @@
 //   ticket:close            opener or staff → asks to confirm
 //   ticket:confirm          transcript to the log channel (and the opener), then delete
 const {
-  SlashCommandBuilder, MessageFlags, ChannelType, PermissionFlagsBits,
+  SlashCommandBuilder, MessageFlags, ChannelType, PermissionFlagsBits, OverwriteType,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle,
   EmbedBuilder, AttachmentBuilder,
 } = require('discord.js');
@@ -214,13 +214,23 @@ function createSupportTickets({ guildId, categoryId, supportRoleId, logChannelId
         PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
         PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks,
       ];
+      // Every overwrite names its type. Without one, discord.js looks the id up
+      // in its cache to decide user-or-role, and throws "not a cached User or
+      // Role" for anyone it hasn't seen.
       const overwrites = [
-        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: uid, allow: allowMember },
-        { id: client(interaction).user.id, allow: [...allowMember, PermissionFlagsBits.ManageChannels] },
+        { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: uid, type: OverwriteType.Member, allow: allowMember },
+        { id: client(interaction).user.id, type: OverwriteType.Member, allow: [...allowMember, PermissionFlagsBits.ManageChannels] },
       ];
-      if (supportRoleId) {
-        overwrites.push({ id: String(supportRoleId), allow: [...allowMember, PermissionFlagsBits.ManageMessages] });
+      // A support role from another server (the GUILD_HALL_STAFF_ROLE_ID
+      // fallback) would fail the whole create. Open the ticket without it and
+      // say why — staff with Manage Server still see every channel.
+      const role = supportRoleId ? guild.roles.cache.get(String(supportRoleId)) : null;
+      if (supportRoleId && !role) {
+        console.error(`support tickets: role ${supportRoleId} is not in the support server — set SUPPORT_ROLE_ID to a role there.`);
+      }
+      if (role) {
+        overwrites.push({ id: role.id, type: OverwriteType.Role, allow: [...allowMember, PermissionFlagsBits.ManageMessages] });
       }
       const channel = await guild.channels.create({
         name: channelName(t.id, interaction.user.username),
@@ -245,10 +255,10 @@ function createSupportTickets({ guildId, categoryId, supportRoleId, logChannelId
       const row = new ActionRowBuilder().addComponents(new ButtonBuilder()
         .setCustomId('ticket:close').setLabel('Close ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger));
       await channel.send({
-        content: `<@${uid}>${supportRoleId ? ` <@&${supportRoleId}>` : ''}`,
+        content: `<@${uid}>${role ? ` <@&${role.id}>` : ''}`,
         embeds: [embed],
         components: [row],
-        allowedMentions: { users: [uid], roles: supportRoleId ? [String(supportRoleId)] : [] },
+        allowedMentions: { users: [uid], roles: role ? [role.id] : [] },
       });
       return interaction.editReply(`Your ticket is open: <#${channel.id}>`);
     } finally {
