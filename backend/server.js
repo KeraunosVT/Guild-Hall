@@ -1714,6 +1714,7 @@ const frontendPath = path.join(__dirname, '../frontend/dist');
 const LANDING_PATH = path.join(__dirname, 'landing.html');
 const PRIVACY_PATH = path.join(__dirname, 'privacy.html');
 const TERMS_PATH = path.join(__dirname, 'terms.html');
+const REFUNDS_PATH = path.join(__dirname, 'refunds.html');
 const COMMANDS_PATH = path.join(__dirname, 'commands.html');
 
 // Public marketing landing page. Shown at the root ONLY to visitors without a
@@ -1727,6 +1728,7 @@ app.get('/landing', (req, res) => res.sendFile(LANDING_PATH));
 // footer and the login screen link here).
 app.get('/privacy', (req, res) => res.sendFile(PRIVACY_PATH));
 app.get('/terms', (req, res) => res.sendFile(TERMS_PATH));
+app.get('/refunds', (req, res) => res.sendFile(REFUNDS_PATH));
 // Discord command reference. Deliberately public and session-free: a member
 // checking option order mid-raid should not have to sign in, and officers link
 // it straight into their own Discord.

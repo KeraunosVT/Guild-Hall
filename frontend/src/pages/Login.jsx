@@ -91,6 +91,7 @@ export default function Login() {
       <div className="mt-6 flex gap-5 text-xs text-ash/70">
         <a href="/privacy" className="hover:text-brassbright transition-colors">Privacy</a>
         <a href="/terms" className="hover:text-brassbright transition-colors">Terms</a>
+        <a href="/refunds" className="hover:text-brassbright transition-colors">Refunds</a>
       </div>
     </div>
   );

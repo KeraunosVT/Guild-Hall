@@ -314,7 +314,7 @@ Do every step on **sandbox** first. Only switch `PADDLE_ENV` to `production` aft
 
 1. **Database:** SQL Editor → run `migrations/saas_014_billing_onboarding.sql` (after saas_013). Run it on the test project too.
 2. **Paddle account:** sign up at [paddle.com](https://www.paddle.com). A live account has to be approved by Paddle before it can sell, so apply early. For testing, use [sandbox-vendors.paddle.com](https://sandbox-vendors.paddle.com).
-3. **Paddle → Catalog:** create a product "Guild Hall", with one **monthly** price. Set its **trial period** (for example 14 days, payment method required). Copy the price id (`pri_…`).
+3. **Paddle → Catalog:** create a product "Guild Hall", with one **monthly** price. Set its **trial period** (7 days, payment method required — the site reads the length from here). Copy the price id (`pri_…`).
 4. **Paddle → Developer tools → Authentication:**
    - Create an **API key** with `price.read` and `customer_portal_session.write`.
    - Create a **client-side token** (`test_…` on sandbox, `live_…` on production).

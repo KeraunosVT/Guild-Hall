@@ -124,8 +124,8 @@ async function webhook(subId, status, { buyer = BUYER, at, secret = SECRET, even
     data: {
       id: subId, status, customer_id: 'ctm_01testtesttesttesttesttest',
       custom_data: buyer ? { discord_user_id: buyer } : null,
-      current_billing_period: status === 'canceled' ? null : { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-21T12:00:00Z' },
-      items: [{ trial_dates: { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-21T12:00:00Z' } }],
+      current_billing_period: status === 'canceled' ? null : { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-14T12:00:00Z' },
+      items: [{ trial_dates: { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-14T12:00:00Z' } }],
     },
   };
   const raw = JSON.stringify(event);

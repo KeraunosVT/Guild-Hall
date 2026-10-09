@@ -270,6 +270,7 @@ export default function Setup() {
         <a href="/landing" className="hover:text-brassbright">Home</a>
         <a href="/privacy" className="hover:text-brassbright">Privacy</a>
         <a href="/terms" className="hover:text-brassbright">Terms</a>
+        <a href="/refunds" className="hover:text-brassbright">Refunds</a>
       </div>
     </div>
   );

@@ -50,15 +50,15 @@ const event = (type, data = {}) => ({
     status: 'trialing',
     customer_id: 'ctm_01',
     custom_data: { discord_user_id: BUYER },
-    current_billing_period: { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-21T12:00:00Z' },
-    items: [{ trial_dates: { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-21T12:00:00Z' } }],
+    current_billing_period: { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-14T12:00:00Z' },
+    items: [{ trial_dates: { starts_at: '2026-10-07T12:00:00Z', ends_at: '2026-10-14T12:00:00Z' } }],
     ...data,
   },
 });
 const n = normalizeSubscription(event('subscription.created'));
 check('the buyer comes from custom_data', n.discordUserId === BUYER);
-check('the trial end comes from the item', n.trialEndsAt === '2026-10-21T12:00:00Z');
-check('the period end comes from the billing period', n.periodEnd === '2026-10-21T12:00:00Z');
+check('the trial end comes from the item', n.trialEndsAt === '2026-10-14T12:00:00Z');
+check('the period end comes from the billing period', n.periodEnd === '2026-10-14T12:00:00Z');
 check('status passes through', n.status === 'trialing');
 check('a malformed buyer id is dropped, not trusted',
   normalizeSubscription(event('subscription.created', { custom_data: { discord_user_id: 'abc' } })).discordUserId === null);
@@ -155,7 +155,7 @@ const ENV = { PADDLE_WEBHOOK_SECRET: SECRET, PADDLE_API_KEY: 'k', PADDLE_PRICE_I
   {
     let up = true;
     const fetchImpl = async () => (up
-      ? { ok: true, status: 200, json: async () => ({ data: { unit_price: { amount: '1500', currency_code: 'USD' }, billing_cycle: { interval: 'month', frequency: 1 }, trial_period: { interval: 'day', frequency: 14 } } }) }
+      ? { ok: true, status: 200, json: async () => ({ data: { unit_price: { amount: '1500', currency_code: 'USD' }, billing_cycle: { interval: 'month', frequency: 1 }, trial_period: { interval: 'day', frequency: 7 } } }) }
       : { ok: false, status: 401, json: async () => ({ error: { code: 'authentication_malformed' } }) });
 
     // Never loaded: still a plan checkout can open, just without an amount.
