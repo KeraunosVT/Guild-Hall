@@ -43,7 +43,20 @@
 </style>
 </head>
 <body>
-<header><div class="wrap brand"><a href="/landing" style="text-decoration:none;"><div class="brand-mark">G</div></a><div class="brand-name">Guild Hall</div></div></header>
+<header><div class="wrap brand">
+  <!-- Same inline logo as landing.html (inline so the wordmark uses the Sora webfont). -->
+  <a href="/landing" aria-label="Guild Hall home" style="display:block;">
+    <svg viewBox="0 0 420 90" font-family="Sora, sans-serif" role="img" aria-label="Guild Hall"
+         style="height:44px;width:auto;display:block;">
+      <defs><linearGradient id="gh-nav-grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#d64545"/><stop offset="1" stop-color="#3a1b18"/>
+      </linearGradient></defs>
+      <rect x="9" y="12" width="66" height="66" rx="16" fill="url(#gh-nav-grad)"/>
+      <g transform="translate(21 24) scale(0.42)" fill="#ffffff"><path d="M50 6 A44 44 0 1 0 94 50 L94 46 L60 46 L60 60 L78 60 A28.5 28.5 0 1 1 50 21.5 A28.3 28.3 0 0 1 69 28.8 L79.5 18.3 A43.8 43.8 0 0 0 50 6 Z"/><rect x="38" y="34" width="8.5" height="33" rx="2.2"/><rect x="55" y="34" width="8.5" height="33" rx="2.2"/><rect x="38" y="46" width="25.5" height="8" rx="2.2"/></g>
+      <text x="92" y="59" font-size="38" font-weight="800" letter-spacing="-0.02em"><tspan fill="#ececeb">Guild</tspan><tspan fill="#d64545">Hall</tspan></text>
+    </svg>
+  </a>
+</div></header>
 <main><div class="wrap doc">
 <h1>Terms of Service — Guild Hall</h1>
 <p><strong>Last updated: 10/08/2026</strong></p>
