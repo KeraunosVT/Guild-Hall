@@ -46,6 +46,7 @@ const gearUpload = multer({
 });
 
 const gateway = require('./discordGateway');
+const createSupportTickets = require('./supportTickets');
 
 const app = express();
 
@@ -170,6 +171,16 @@ const auditLog = supabase ? createAuditLog(supabase) : null;
 // imports GUILD_HEADER from it, and requiring back the other way would be a
 // cycle. See the note on createGuildContext.
 const { resolveGuildOrSingle } = createGuildContext(supabase, applyGuildAccess);
+
+// Support tickets in the Guild Hall HQ server. Platform config, like
+// GUILD_HALL_STAFF_* — never a tenant's. Off unless a ticket category is set.
+// Set before start() so /ticketpanel is registered when the bot connects.
+gateway.setSupportTickets(createSupportTickets({
+  guildId: process.env.SUPPORT_GUILD_ID || process.env.GUILD_HALL_STAFF_GUILD_ID,
+  categoryId: process.env.SUPPORT_TICKET_CATEGORY_ID,
+  supportRoleId: process.env.SUPPORT_ROLE_ID || process.env.GUILD_HALL_STAFF_ROLE_ID,
+  logChannelId: process.env.SUPPORT_LOG_CHANNEL_ID,
+}));
 
 // The gateway needs Supabase for /elitetimer persistence, so start it after setup.
 gateway.start(supabase);
@@ -1729,6 +1740,16 @@ app.get('/landing', (req, res) => res.sendFile(LANDING_PATH));
 app.get('/privacy', (req, res) => res.sendFile(PRIVACY_PATH));
 app.get('/terms', (req, res) => res.sendFile(TERMS_PATH));
 app.get('/refunds', (req, res) => res.sendFile(REFUNDS_PATH));
+// "Help" everywhere on the site lands here, so the support server's invite can
+// change without editing every page. Only a Discord URL is followed; until one
+// is set, it's the operator's Discord profile — the contact the legal pages
+// used before there was a support server.
+const SUPPORT_FALLBACK_URL = 'https://discord.com/users/keraunosvt';
+app.get('/help', (req, res) => {
+  const invite = String(process.env.SUPPORT_INVITE_URL || '').trim();
+  const ok = /^https:\/\/(discord\.gg|discord\.com\/invite)\/[A-Za-z0-9-]+\/?$/.test(invite);
+  res.redirect(302, ok ? invite : SUPPORT_FALLBACK_URL);
+});
 // Discord command reference. Deliberately public and session-free: a member
 // checking option order mid-raid should not have to sign in, and officers link
 // it straight into their own Discord.

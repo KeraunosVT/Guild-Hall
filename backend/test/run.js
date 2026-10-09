@@ -22,6 +22,9 @@ const SUITES = [
   // The Paddle webhook: signatures, reading the buyer, and answering so Paddle
   // retries exactly the events we failed to apply.
   ['billing webhook', 'billing.js', false],
+  // HQ support tickets: never claiming a tenant server's clicks, and only the
+  // opener or staff closing (deleting) a ticket channel.
+  ['support tickets', 'supportTickets.js', false],
   ['login flow', 'loginFlow.js', true],
   ['bot isolation', 'botIsolation.js', true],
   ['API isolation (two guilds)', 'apiIsolation.js', true],

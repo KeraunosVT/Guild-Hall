@@ -92,6 +92,7 @@ export default function Login() {
         <a href="/privacy" className="hover:text-brassbright transition-colors">Privacy</a>
         <a href="/terms" className="hover:text-brassbright transition-colors">Terms</a>
         <a href="/refunds" className="hover:text-brassbright transition-colors">Refunds</a>
+        <a href="/help" target="_blank" rel="noopener noreferrer" className="hover:text-brassbright transition-colors">Help</a>
       </div>
     </div>
   );

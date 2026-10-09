@@ -3,7 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Swords, Users, Gem, Package, CalendarOff, Layers, Gauge,
   Upload, LayoutGrid, Tag, Gavel, ClipboardCheck, ScrollText, ShieldCheck, LogOut, Settings, ChevronDown,
-  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair, Home, Building2,
+  Terminal, Heart, CalendarCheck, CalendarRange, Handshake, Crosshair, Home, Building2, LifeBuoy,
 } from 'lucide-react';
 import Sigil from './Sigil';
 import { useGuild } from '../guild';
@@ -138,12 +138,20 @@ export default function Sidebar({ collapsed }) {
           {!collapsed && <span className="truncate">Bot commands</span>}
         </a>
         <a
+          href="/help" target="_blank" rel="noopener noreferrer"
+          title={collapsed ? 'Help & support' : undefined}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-ash hover:text-bone hover:bg-panel transition-colors"
+        >
+          <LifeBuoy className="w-4 h-4 shrink-0" />
+          {!collapsed && <span className="truncate">Help &amp; support</span>}
+        </a>
+        <a
           href="https://ko-fi.com/keraunosgg" target="_blank" rel="noopener noreferrer"
-          title={collapsed ? 'Support Guild Hall' : undefined}
+          title={collapsed ? 'Donate to Guild Hall' : undefined}
           className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-ash hover:text-brassbright hover:bg-panel transition-colors"
         >
           <Heart className="w-4 h-4 shrink-0" />
-          {!collapsed && <span className="truncate">Support Guild Hall</span>}
+          {!collapsed && <span className="truncate">Donate to Guild Hall</span>}
         </a>
         {/* Platform staff only (deploy-time config, backend/staff.js). Every
             tenant, not this one — so it sits with the Guild Hall links, not

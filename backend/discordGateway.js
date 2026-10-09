@@ -155,6 +155,12 @@ function start(supabase) {
 let presenceListener = null;
 function setPresenceListener(fn) { presenceListener = typeof fn === 'function' ? fn : null; }
 
+// Guild Hall's own support tickets (supportTickets.js), in the HQ server only.
+// Set from outside for the same reason as the listener above. Must be set before
+// the gateway connects, so /ticketpanel is registered with the other commands.
+let supportTickets = null;
+function setSupportTickets(handler) { supportTickets = handler || null; }
+
 async function markBotPresence(discordGuildId, present) {
   if (!db || !discordGuildId) return false;
   let q = db.from('guilds')
@@ -326,8 +332,8 @@ async function registerCommands() {
     );
   commands.push(announceCommand.toJSON());
 
+  const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
   try {
-    const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
     // GLOBAL, not per-guild (plan task 12). Guild-scoped registration publishes
     // the commands to one server only, so every other tenant's members would
     // see nothing. Global commands appear everywhere the bot is, and
@@ -338,6 +344,17 @@ async function registerCommands() {
     console.log(`✅ Registered ${commands.length} global slash command(s)`);
   } catch (err) {
     console.error('❌ Failed to register commands:', err.message);
+  }
+
+  // The exception to global: /ticketpanel exists in the HQ server only, so no
+  // tenant ever sees a Guild Hall staff command in their own server.
+  if (supportTickets) {
+    try {
+      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, supportTickets.guildId), { body: supportTickets.commands });
+      console.log('✅ Registered support ticket command(s) in the HQ server');
+    } catch (err) {
+      console.error('❌ Failed to register support ticket commands:', err.message);
+    }
   }
 }
 
@@ -356,6 +373,11 @@ async function resolveTenant(interaction) {
 }
 
 async function handleInteraction(interaction) {
+  // Support tickets answer before tenant resolution: the HQ server is usually
+  // not a registered guild. owns() only claims ticket interactions from the HQ
+  // server itself, so nothing from a tenant's server can take this path.
+  if (supportTickets && supportTickets.owns(interaction)) return supportTickets.handle(interaction);
+
   const tenant = await resolveTenant(interaction);
   if (!tenant) {
     // Autocomplete cannot show an error, so return an empty list; a command or
@@ -1663,7 +1685,7 @@ module.exports = {
   start, listVoiceChannels, listTextChannels, getVoiceMembers, deleteLoaMessage, notifyAttendance, announceLoaEntry,
   notifyLateAttendance,
   postSignupMessage, refreshSignupMessage, deleteSignupMessage, sendSignupReminders,
-  sendDirectMessage, postToChannel, lookupUser, setPresenceListener,
+  sendDirectMessage, postToChannel, lookupUser, setPresenceListener, setSupportTickets,
 };
 
 // ── Test seam ───────────────────────────────────────────────────────────────
